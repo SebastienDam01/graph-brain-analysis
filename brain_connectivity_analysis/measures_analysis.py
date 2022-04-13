@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Feb 28 14:18:12 2022
-
-@author: sdam
-"""
 
 import pickle
 import random
 import copy
+import sys
 from GraphRicciCurvature.OllivierRicci import OllivierRicci
 import networkx as nx
-import os 
 import bct
 
 import numpy as np
@@ -20,11 +14,12 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
 from nilearn import plotting
+from tqdm import tqdm 
 sns.set()
 
-os.chdir('..')
+sys.path.append('utils')
 
-from utils.utils import printProgressBar
+from utils import printProgressBar
 
 THRESHOLD = 0.3
 
@@ -148,6 +143,69 @@ def filter_weights(matrix, ratio):
         filtered_matrix[j,i] = w
     
     return filtered_matrix
+
+def node_curvature(matrix):
+    '''
+    Compute node curvature for each node of the matrix input.
+
+    Parameters
+    ----------
+    matrix : NxN np.ndarray
+        connectivity matrix.
+
+    Returns
+    -------
+    curvature : Nx1 np.ndarray
+        node curvature vector.
+
+    '''
+    n = len(matrix)
+    curvature = np.zeros((n))
+    G_nx = get_network(matrix)
+    orc = OllivierRicci(G_nx, alpha=0.5, verbose="INFO")
+    orc.compute_ricci_curvature()
+    
+    for region_count in range(n):
+        curvature[region_count] = orc.G.nodes[region_count]['ricciCurvature']
+    return curvature
+
+def apply_threshold(input_, atlas):
+    '''
+    Set values which are lesser than threshold to 0.
+
+    Parameters
+    ----------
+    input_ : Nx1 or NxN np.ndarray
+        p values or squared matrix
+    threshold : float
+
+    Returns
+    -------
+    dictionary_copy : NxN np.ndarray
+        copy of the matrix where the threshold was applied
+
+    '''
+    atlas_copy = copy.deepcopy(atlas)
+    
+    if len(input_.shape) == 2: # matrix NxN  
+        indices_set_to_zero = []
+        indices_set_to_zero.append([index for index in range(len(input_)) if (
+            np.unique(input_[:, index] == 0)[0])]
+            )
+        atlas_copy[indices_set_to_zero, :] = 0
+    
+        return atlas_copy
+        
+    else: # vector Nx1
+        indices_set_to_zero = [i for i in range(len(input_)) if input_[i] >= 0.05/80]
+        atlas_copy[indices_set_to_zero] = 0
+        
+        indices_set_to_one = [i for i in range(len(input_)) if input_[i] < 0.05/80]
+        matrix = np.zeros((nb_ROI, nb_ROI))
+        for index in indices_set_to_one:
+            matrix[index][index] = 1
+        
+        return matrix, atlas_copy
 
 #%%
 # Network measures 
@@ -622,55 +680,6 @@ def average_neighbor_degree(matrix):
         k[i] = (1 / s[i]) * w_k
     return k
 
-def node_curvature(matrix):
-    n = len(matrix)
-    curvature = np.zeros((n))
-    G_nx = get_network(matrix)
-    orc = OllivierRicci(G_nx, alpha=0.5, verbose="INFO")
-    orc.compute_ricci_curvature()
-    
-    for region_count in range(n):
-        curvature[region_count] = orc.G.nodes[region_count]['ricciCurvature']
-    return curvature
-
-def apply_threshold(input_, atlas):
-    '''
-    Set values which are lesser than threshold to 0.
-
-    Parameters
-    ----------
-    input : Nx1 or NxN np.array
-        p_values or squared matrix
-    threshold : float
-
-    Returns
-    -------
-    dictionary_copy : NxN np.array
-        copy of the matrix where the threshold was applied
-
-    '''
-    atlas_copy = copy.deepcopy(atlas)
-    
-    if len(input_.shape) == 2: # matrix NxN  
-        indices_set_to_zero = []
-        indices_set_to_zero.append([index for index in range(len(input_)) if (
-            np.unique(input_[:, index] == 0)[0])]
-            )
-        atlas_copy[indices_set_to_zero, :] = 0
-    
-        return atlas_copy
-        
-    else: # vector Nx1
-        indices_set_to_zero = [i for i in range(len(input_)) if input_[i] >= 0.05/80]
-        atlas_copy[indices_set_to_zero] = 0
-        
-        indices_set_to_one = [i for i in range(len(input_)) if input_[i] < 0.05/80]
-        matrix = np.zeros((nb_ROI, nb_ROI))
-        for index in indices_set_to_one:
-            matrix[index][index] = 1
-        
-        return matrix, atlas_copy
-
 #%% Conversion from fiber numbers to density and apply connection threshold
 #for patient in connectivity_matrices.keys():
 #    connectivity_matrices[patient] = filter_weights(connectivity_matrices[patient], THRESHOLD)
@@ -699,12 +708,11 @@ global_metrics = ['charac_path',
                   'global_strength']
 
 metrics_patients = dict((k, []) for k in local_metrics + global_metrics)
-
 metrics_controls = dict((k, []) for k in local_metrics + global_metrics)
 
 # Construction of feature vectors
-
-printProgressBar(0, patients_count, prefix = 'Progress:', suffix = 'Complete', length = 50)
+print("Computing graph measures for patients and controls...")
+printProgressBar(0, patients_count, prefix = 'Patients progress:', suffix = 'Complete', length = 50)
 patient_idx = 0
 for patient in patients:
     G = connectivity_matrices[patient]
@@ -738,7 +746,7 @@ for patient in patients:
     patient_idx += 1
     printProgressBar(patient_idx, patients_count, prefix = 'Patients progress:', suffix = 'Complete', length = 50)
 
-printProgressBar(0, controls_count, prefix = 'Progress:', suffix = 'Complete', length = 50)
+printProgressBar(0, controls_count, prefix = 'Controls progress:', suffix = 'Complete', length = 50)
 control_idx = 0
 for control in controls:
     G = connectivity_matrices[control]
@@ -772,31 +780,7 @@ for control in controls:
     control_idx += 1
     printProgressBar(control_idx, controls_count, prefix = 'Controls progress:', suffix = 'Complete', length = 50)
 
-
-df_patients = pd.DataFrame(metrics_patients)
-df_controls = pd.DataFrame(metrics_controls)
-print("Metrics successfully computed")
-
-#%% Mean and std measures of each region
-mean_measures_patients = {} # mean value of the measures per region
-std_measures_patients = {} # standard deviation of the measures per region
-for measure in df_patients.keys():
-    if measure in local_metrics:
-        measures_per_region = np.zeros((patients_count, nb_ROI))
-        for patient_count in range(len(df_patients[measure])):
-            measures_per_region[patient_count, :] = df_patients[measure][patient_count]
-        mean_measures_patients[measure] = np.mean(measures_per_region, axis=0)
-        std_measures_patients[measure] = np.std(measures_per_region, axis=0)
-
-mean_measures_controls = {} # mean value of the measures per region
-std_measures_controls = {} # standard deviation of the measures per region
-for measure in df_controls.keys():
-    if measure in local_metrics:
-        measures_per_region = np.zeros((controls_count, nb_ROI))
-        for control_count in range(len(df_controls[measure])):
-            measures_per_region[control_count, :] = df_controls[measure][control_count]
-        mean_measures_controls[measure] = np.mean(measures_per_region, axis=0)
-        std_measures_controls[measure] = np.std(measures_per_region, axis=0)
+print("Metrics successfully computed.")
     
 #%% Measures for each region
 measures_patients = {}
@@ -812,6 +796,21 @@ for measure in metrics_controls.keys():
         measures_controls[measure] = np.zeros((controls_count, nb_ROI))
         for control_count in range(len(metrics_controls[measure])):
             measures_controls[measure][control_count, :] = metrics_controls[measure][control_count]
+            
+#%% Mean and std measures of each region
+mean_measures_patients = {} # mean value of the measures per region
+std_measures_patients = {} # standard deviation of the measures per region
+for measure in measures_patients.keys():
+    if measure in local_metrics:
+        mean_measures_patients[measure] = np.mean(measures_patients[measure], axis=0)
+        std_measures_patients[measure] = np.std(measures_patients[measure], axis=0)
+            
+mean_measures_controls = {} # mean value of the measures per region
+std_measures_controls = {} # standard deviation of the measures per region
+for measure in measures_patients.keys():
+    if measure in local_metrics:
+        mean_measures_controls[measure] = np.mean(measures_controls[measure], axis=0)
+        std_measures_controls[measure] = np.std(measures_controls[measure], axis=0)
     
 #%% Statistical test for each region
 p_value_region = {}
@@ -903,8 +902,6 @@ for patient_idx in range(patients_count):
         for j in range(nb_ROI):
             connections_patients[i, j, patient_idx] = connectivity_matrices_wo_threshold[patients[patient_idx]][i][j]
 #%% 2. t-test
-from tqdm import tqdm 
-
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
@@ -913,7 +910,7 @@ for i in tqdm(range(nb_ROI)):
         
 #%%
 p_value_connection_bounded = copy.deepcopy(p_value_connection)
-p_value_connection_bounded[p_value_connection_bounded > 0.05 / 3160] = 1
+p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
 np.fill_diagonal(p_value_connection_bounded, 1)
 # dirty
 p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
@@ -937,7 +934,7 @@ plotting.show()
 
 #%% Retrieve direction of significance in significant ROIs
 significant_ROIs = np.argwhere(p_value_connection_bounded_inverse != 0)
-#significant_ROIs = np.unique(np.sort(significant_ROIs, axis=1).view(','.join([significant_ROIs.dtype.char]*2))).view(significant_ROIs.dtype).reshape(-1, 2)
+# Remove duplicate rows and pairs
 dupli_rows = []
 for i in range(significant_ROIs.shape[0]):
     if significant_ROIs[i, 0] == significant_ROIs[i, 1]:
@@ -1096,7 +1093,7 @@ X = np.column_stack((np.ones(subject_count), data.Age, data.Gender, data.Patient
 y = np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
 
 #%% Test on one single metric
-fitted, B, t, df, p = t_stat(y, X, [0, 1, 0, -1, 1])
+fitted, B, t, df, p = t_stat(y, X, [0, 0, 0, -1, 1])
 print(t, p)
 plt.plot(y, label='values')
 plt.plot(fitted, label='fitted values')
