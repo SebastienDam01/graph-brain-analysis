@@ -1,2 +1,5 @@
 graph_pictures/*
 *.odt
+*.txt
+*.png
+*.mat

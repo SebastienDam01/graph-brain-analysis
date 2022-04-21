@@ -19,12 +19,27 @@ os.chdir('..')
 # Folder in which data is placed
 data_folder = 'data/volumes'
 
+#%% Rename old prefix by new prefix of volumes if needed
+'''
+def renamePrefix(data_folder, old_prefix, new_prefix):
+    for filename in os.listdir(data_folder):
+        if filename.startswith(old_prefix):
+            print(filename)
+            os.rename(os.path.join(data_folder, filename), os.path.join(data_folder, filename.replace(old_prefix, new_prefix)))
+            
+        if len(filename) > 18 and filename[18] == '_':
+            print(filename, filename[:18] + filename[19:])
+            os.rename(os.path.join(data_folder, filename), os.path.join(data_folder, filename[:18] + filename[19:]))
+            
+renamePrefix(data_folder, 'volume_ROI_dwi_', 'volume_ROI_')
+'''
+#%%
 
 # prefix at the beginning of each .txt file; it is specified here in order to select 
 # relevant files, as well as to make file name lighter during loading for 
 # further operations (such as printing subjects names), since it does not carry 
 # additional information.
-prefix = 'volume_ROI_dwi_'
+prefix = 'volume_ROI_'
 
 # For instance here, with those setting, every ../data/*_fiber_number.mat 
 # will be loaded
@@ -32,7 +47,7 @@ prefix = 'volume_ROI_dwi_'
 # Keys used to split data between patients and controls. Subject whose filename 
 # contains one of the control_keys will be affected to the control cohort, and 
 # similarly for patients.
-control_keys = ['060', 'dep', 'dpr', 'S', 'TI']
+control_keys = ['060', 'dep', 'dpr', 'S', 'TI', 'DEP']
 patient_keys = ['lgp']
 
 # By default, the code expects a "table.csv" present in data_folder, containing 

@@ -13,15 +13,24 @@ from scipy.io import loadmat
 import seaborn as sns
 sns.set()
 
-os.chdir('..')
-
 # ## Configure paths for data once for all
 
 # +
 
 # Folder in which data is placed
-data_folder = 'data/diffusion'
+data_folder = '../data/diffusion'
 
+#%% Rename old prefix by new prefix of volumes if needed
+'''
+def renamePrefix(data_folder):
+    for filename in os.listdir(data_folder):
+        if filename[7] == '_':
+            print(filename, filename[:7] + filename[8:])
+            os.rename(os.path.join(data_folder, filename), os.path.join(data_folder, filename[:7] + filename[8:]))
+            
+renamePrefix(data_folder)
+'''
+#%%
 
 # Suffix at the end of each .mat file; it is specified here in order to select 
 # relevant files, as well as to make file name lighter during loading for 
@@ -35,7 +44,7 @@ suffix = '_fiber_number.mat'
 # Keys used to split data between patients and controls. Subject whose filename 
 # contains one of the control_keys will be affected to the control cohort, and 
 # similarly for patients.
-control_keys = ['060', 'dep', 'dpr', 'S', 'TI']
+control_keys = ['060', 'dep', 'dpr', 'S', 'TI', 'DEP']
 patient_keys = ['lgp']
 
 # By default, the code expects a "table.csv" present in data_folder, containing 
@@ -139,11 +148,11 @@ for key, mat in connectivity_matrices.items():
             non_fonctional_mat.append((key, i))
             
 print("Empty matrices:", null_matrices)
-print("Diagonal matrices", diag_matrices)
+print("Diagonal matrices:", diag_matrices)
     
 #%% Dump data
 
-with open('manage_data/data_preprocessed.pickle', 'wb') as f:
+with open('../manage_data/data_preprocessed.pickle', 'wb') as f:
     pickle.dump(
         [connectivity_matrices,
          controls,

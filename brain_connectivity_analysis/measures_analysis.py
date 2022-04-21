@@ -17,39 +17,41 @@ from nilearn import plotting
 from tqdm import tqdm 
 sns.set()
 
-sys.path.append('utils')
-
+sys.path.append('../utils')
+#sys.path.insert(0, '../utils')
 from utils import printProgressBar
 
 THRESHOLD = 0.3
 
 # Load variables from data_preprocessed.pickle
-with open('manage_data/data_preprocessed.pickle', 'rb') as f:
+with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
     connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
-with open('manage_data/volumes_preprocessed.pickle', 'rb') as f:
+with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
     volumes_ROI = pickle.load(f)
     
 nb_ROI = len(connectivity_matrices[patients[0]])
 
 # TEMPORARY
-subjects_to_delete = ['lgp_164AS', 
-                      'lgp_080FD', 
-                      'lgp_081LJ', 
+subjects_to_delete = ['lgp_081LJ',
                       'lgp_096MS',
-                      'lgp_129LN',
-                      'lgp_086CA']
+                      'lgp_086CA',
+                      'S168',
+                      'EMODES_003LS', # no info on excel
+                      'EMODES_004ML']
 
 for subject in subjects_to_delete:
     if subject in patients:
         patients.remove(subject)
+        patients_count -= 1
     else:
         print(subject)
         controls.remove(subject)
+        controls_count -= 1
         
 subject_count = subject_count - len(subjects_to_delete)
-patients_count = patients_count - len(subjects_to_delete)
+# patients_count = patients_count - len(subjects_to_delete)
 
 connectivity_matrices = dict([(key, val) for key, val in 
            connectivity_matrices.items() if key not in subjects_to_delete])
@@ -94,20 +96,24 @@ def get_parsimonious_network(matrices, ratio=0.7, ratio_fiber=0):
     threshold = ratio * len(matrices)
     null_entries_count = np.zeros((n, n))
     matrices_copy = copy.deepcopy(matrices)
+    key_cnt = {}
     
     for mat in matrices_copy.values():
         null_entries = np.argwhere(mat == 0)
         for i, j in null_entries:
             null_entries_count[i, j] += 1
     
-    for mat in matrices_copy.values():
+    for key, mat in matrices_copy.items():
+        # mat[null_entries_count >= threshold] = 0
+        key_cnt[key] = []
         count = 0
         for i in range(n):
             for j in range(n):
                 if null_entries_count[i, j] >= threshold and mat[i,j] != 0:
                     mat[i, j] = 0
+                    key_cnt[key].append([i, j])
                     count+=1
-    return matrices_copy
+    return key_cnt, matrices_copy
 
 def get_network(matrix, threshold = 0):
     """ 
@@ -685,9 +691,25 @@ def average_neighbor_degree(matrix):
 #    connectivity_matrices[patient] = filter_weights(connectivity_matrices[patient], THRESHOLD)
 #connectivity_matrices_wo_threshold = nb_fiber2density(connectivity_matrices, volumes_ROI)
 connectivity_matrices_wo_threshold = copy.deepcopy(connectivity_matrices)
-connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
+count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
 connectivity_matrices = nb_fiber2density(connectivity_matrices, volumes_ROI)
 
+#%% Distribution of connections thresholded
+dist_connection = {}
+for subject in count_parsimonious.keys():
+    if len(count_parsimonious[subject]) > 100:
+        dist_connection[subject] = len(count_parsimonious[subject])
+
+plt.figure(figsize=(15, 5))
+df = pd.DataFrame.from_dict(dist_connection, orient='index', columns=['edges_removed'])
+df = df.sort_values(by=['edges_removed'], ascending=False)
+sns.barplot(x=df.index,
+            y=df.edges_removed,
+            color='darkblue')
+plt.ylabel('Number of edges removed')
+plt.xticks(rotation=80)
+plt.tight_layout()
+plt.show()
 ##############################
 #%% Graph metrics analysis
 ##############################
@@ -829,7 +851,7 @@ for measure in p_value_region.keys():
         print(measure, "- Number of p_value inferior to 0.05/80:", (p_value_region[measure] < 0.05/80).sum())
         
 #%% Plot values and significant differences - Local measures
-atlas_region_coords = np.loadtxt('data/COG_free_80s.txt')
+atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
 
 measures_networks = ['Clustering coefficient',
                      'Local efficiency',
@@ -905,7 +927,7 @@ for patient_idx in range(patients_count):
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
-    for j in range(nb_ROI):
+    for j in range(nb_ROI): 
         statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(connections_patients[i, j, :], connections_controls[i, j, :], equal_var=False)
         
 #%%
@@ -929,8 +951,23 @@ disp = plotting.plot_connectome(p_value_connection_bounded_inverse,
                                 atlas_threshold,
                                 figure=fig)
 
-# disp.savefig('brain_connectivity_analysis/graph pictures on good matrices/' + measures_networks[i] + '_brain', dpi=600)
+# disp.savefig('brain_connectivity_analysis/graph_pictures/' + measures_networks[i] + '_brain', dpi=600)
 plotting.show()
+
+#%% Heatmap 
+'''
+For large positive t-score, we have evidence that patients mean is greater than the controls mean. 
+'''
+significant_t_score = copy.deepcopy(statistics)
+significant_t_score[p_value_connection_bounded_inverse == 0] = 0
+plt.imshow(significant_t_score, cmap='bwr')
+plt.colorbar(label="t-statistic")
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+#plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
+plt.show()
 
 #%% Retrieve direction of significance in significant ROIs
 significant_ROIs = np.argwhere(p_value_connection_bounded_inverse != 0)
@@ -985,7 +1022,7 @@ for i in range(significant_ROIs.shape[0]):
         mean_inf_weights[i] = 0
     
 fig, ax = plt.subplots()
-fig.set_size_inches(15, 5)
+fig.set_size_inches(20, 5)
 x = np.arange(significant_ROIs.shape[0])
 ax.vlines(x, 0, mean_supp_weights, color='g', label='patients edges > controls edges')
 ax.vlines(x, mean_inf_weights, 0, color='r')
@@ -1013,7 +1050,7 @@ gender_controls = [int(i) for i in [patient_info_dict[key]['Gender'] for key in 
 print("Number of males in patients:", gender_patients.count(1))
 print('Number of females in patients:', gender_patients.count(2))
 print("Number of males in controls:", gender_controls.count(1))
-print('Number of females in patients:', gender_controls.count(2))
+print('Number of females in controls:', gender_controls.count(2))
 
 print("Patients - Age mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(age_patients), np.std(age_patients)))
 print("Controls - Age mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(age_controls), np.std(age_controls)))
@@ -1083,17 +1120,19 @@ for i in range(subject_count):
 age = age_patients + age_controls
 
 data = pd.DataFrame({
-    "Age": age, #- np.mean(age, axis=0),
+    "Intercept": np.ones(subject_count),
+    "Age": age - np.mean(age, axis=0),
     "Gender": gender,
-    "Patients": group_patients,
-    "Controls": group_controls
+    "global_efficiency": np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
+    # "Patients": group_patients,
+    # "Controls": group_controls
     })
 
-X = np.column_stack((np.ones(subject_count), data.Age, data.Gender, data.Patients, data.Controls))
+X = np.column_stack((np.ones(subject_count), data.Age, data.Gender))
 y = np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
 
 #%% Test on one single metric
-fitted, B, t, df, p = t_stat(y, X, [0, 0, 0, -1, 1])
+fitted, B, t, df, p = t_stat(y, X, [0, 0, 0])
 print(t, p)
 plt.plot(y, label='values')
 plt.plot(fitted, label='fitted values')
@@ -1105,25 +1144,66 @@ plt.grid(False)
 plt.show()
 
 #%% Fitted measures per region
-def glm_pipeline(c):
-    dictionary = {}
+# def glm_pipeline(c):
+#     dictionary = {}
     
-    # local measures
-    for measure in measures_patients.keys():
-        y = np.vstack((measures_patients[measure], measures_controls[measure]))
-        fitted, _, _, _, p = t_stat(y, X, c)
-        dictionary[measure] = fitted
+#     # local measures
+#     for measure in measures_patients.keys():
+#         y = np.vstack((measures_patients[measure], measures_controls[measure]))
+#         fitted, _, _, _, p = t_stat(y, X, c)
+#         dictionary[measure] = fitted
     
-    # global measures
-    for measure in global_metrics:
-        y = np.hstack((metrics_patients[measure], metrics_controls[measure]))
-        fitted, _, _, _, p = t_stat(y, X, c)
-        dictionary[measure] = fitted
+#     # global measures
+#     for measure in global_metrics:
+#         y = np.hstack((metrics_patients[measure], metrics_controls[measure]))
+#         fitted, _, _, _, p = t_stat(y, X, c)
+#         dictionary[measure] = fitted
     
-    return dictionary
+#     return dictionary
 
-fitted_measures = glm_pipeline([0, 0, 0, -1, 1])
+# fitted_measures = glm_pipeline([0, 0, 0])
 
+#%% Distribution of fibers per connexion 
+plt.figure(figsize=(10, 5))
+connections_subjets = np.concatenate((connections_controls, connections_patients), axis=2)
+plt.hist(connections_subjets[0, 4, :])
+plt.show()
+
+#%% statsmodels
+import statsmodels.api as sm 
+
+def plot_fittedvalues(y_, model):
+    plt.plot(y_, label='values')
+    plt.plot(model.fittedvalues, label='fitted values')
+    plt.axvline(x=patients_count, linestyle='--', color='red', label='Patients/Controls separation')
+    plt.ylabel('Global efficiency')
+    plt.xlabel('Subject')
+    plt.legend()
+    plt.grid(False)
+    plt.show()
+
+glm = sm.GLM.from_formula('global_efficiency~' + '+'.join(data.columns.difference(['global_efficiency', 'Intercept'])), data).fit()
+print(glm.summary())
+plot_fittedvalues(y, glm)
+#%% Quadratic age-related changes
+data = pd.DataFrame({
+    "Intercept": np.ones(subject_count),
+    "Age": age - np.mean(age, axis=0),
+    "Age_squared": (age - np.mean(age, axis=0)) ** 2,
+    "Gender": gender,
+    "global_efficiency": np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
+    })
+
+glm = sm.GLM.from_formula('global_efficiency~' + '+'.join(data.columns.difference(['global_efficiency', 'Intercept'])), data).fit()
+print(glm.summary())
+plot_fittedvalues(y, glm)
+
+#%% Sex-related difference
+glm = sm.GLM.from_formula('global_efficiency ~ Age + Gender + Age*Gender', data).fit()
+print(glm.summary())
+plot_fittedvalues(y, glm)
+
+#%%
 '''
 #%% Mean and std measures of each region
 mean_measures_patients = {} # mean value of the measures per region
