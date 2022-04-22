@@ -720,7 +720,7 @@ local_metrics = ['clust_coef',
                  'deg',
                  'between_cen',
                  'parti_coef',
-                 'net_resilience',
+                 #'net_resilience', # nan values
                  'curvature',
                  'strength']
 
@@ -747,7 +747,7 @@ for patient in patients:
     between_cen = betweenness_centrality(G)
     ci, _ = modularity_louvain_und(G)
     parti_coef = participation_coef(G, ci)
-    net_resilience = average_neighbor_degree(G)
+    #net_resilience = average_neighbor_degree(G)
     curvature = node_curvature(G)
     strength = bct.strengths_und(G)
     # small_worldness = nx.sigma(get_network(G))
@@ -759,7 +759,7 @@ for patient in patients:
     metrics_patients['deg'].append(deg)
     metrics_patients['between_cen'].append(between_cen)
     metrics_patients['parti_coef'].append(parti_coef)
-    metrics_patients['net_resilience'].append(net_resilience)
+    #metrics_patients['net_resilience'].append(net_resilience)
     metrics_patients['curvature'].append(curvature)
     metrics_patients['global_clust_coef'].append(np.mean(clust_coef))
     metrics_patients['strength'].append(strength)
@@ -781,7 +781,7 @@ for control in controls:
     between_cen = betweenness_centrality(G)
     ci, _ = modularity_louvain_und(G)
     parti_coef = participation_coef(G, ci)
-    net_resilience = average_neighbor_degree(G)
+    #net_resilience = average_neighbor_degree(G)
     curvature = node_curvature(G)
     strength = bct.strengths_und(G)
     # small_worldness = nx.sigma(get_network(G))
@@ -793,7 +793,7 @@ for control in controls:
     metrics_controls['deg'].append(deg)
     metrics_controls['between_cen'].append(between_cen)
     metrics_controls['parti_coef'].append(parti_coef)
-    metrics_controls['net_resilience'].append(net_resilience)
+    #metrics_controls['net_resilience'].append(net_resilience)
     metrics_controls['curvature'].append(curvature)
     metrics_controls['global_clust_coef'].append(np.mean(clust_coef))
     metrics_controls['strength'].append(strength)
@@ -858,7 +858,7 @@ measures_networks = ['Clustering coefficient',
                      'Degree',
                      'Betweenness centrality',
                      'Participation coefficient',
-                     'Net resilience (average neighbor degree)',
+                     #'Net resilience (average neighbor degree)',
                      'Node curvature',
                      'Strength']
 
@@ -923,6 +923,7 @@ for patient_idx in range(patients_count):
     for i in range(nb_ROI):
         for j in range(nb_ROI):
             connections_patients[i, j, patient_idx] = connectivity_matrices_wo_threshold[patients[patient_idx]][i][j]
+            
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
@@ -986,30 +987,6 @@ mean_connections_patients = np.mean(connections_patients, axis=2)[significant_RO
 std_connections_patients = np.std(connections_patients, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
 mean_connections_controls = np.mean(connections_controls, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
 std_connections_controls = np.std(connections_controls, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
-
-plt.figure(figsize=(11, 5))
-plt.plot(mean_connections_controls, marker='o', color='darkturquoise', label='controls')
-plt.fill_between(np.linspace(0,significant_ROIs.shape[0]-1,significant_ROIs.shape[0]), 
-                 mean_connections_controls - std_connections_controls, 
-                 mean_connections_controls + std_connections_controls,
-                 alpha=0.25,
-                 color='cyan',
-                 edgecolor='steelblue',
-                 linewidth=2)
-
-plt.plot(mean_connections_patients, marker='o', color='black', label='patients')
-plt.fill_between(np.linspace(0,significant_ROIs.shape[0]-1,significant_ROIs.shape[0]), 
-                 mean_connections_patients - std_connections_patients, 
-                 mean_connections_patients + std_connections_patients,
-                 alpha=0.5,
-                 color='darkgray',
-                 edgecolor='dimgray',
-                 linewidth=2)
-
-plt.xticks(np.linspace(0,significant_ROIs.shape[0]-1,significant_ROIs.shape[0]).astype(int), rotation=70)
-plt.legend()
-#plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/direction_significance.png', dpi=600)
-plt.show()
 
 #%% Idem but with a different style of plot (preferable)
 mean_diff_weights = mean_connections_patients - mean_connections_controls
@@ -1085,6 +1062,7 @@ def t_stat(y, X, c):
     beta = np.linalg.pinv(X).dot(y)
     # The fitted values - y hat
     fitted = X.dot(beta)
+    # fitted = X.dot(np.linalg.inv(X.T.dot(X)).dot(X.T)).dot(y)
     # Residual error
     errors = y - fitted
     # Residual sum of squares
@@ -1165,8 +1143,8 @@ plt.show()
 
 #%% Distribution of fibers per connexion 
 plt.figure(figsize=(10, 5))
-connections_subjets = np.concatenate((connections_controls, connections_patients), axis=2)
-plt.hist(connections_subjets[0, 4, :])
+connections_subjects = np.concatenate((connections_controls, connections_patients), axis=2)
+plt.hist(connections_subjects[0, 4, :])
 plt.show()
 
 #%% statsmodels
@@ -1182,27 +1160,233 @@ def plot_fittedvalues(y_, model):
     plt.grid(False)
     plt.show()
 
-glm = sm.GLM.from_formula('global_efficiency~' + '+'.join(data.columns.difference(['global_efficiency', 'Intercept'])), data).fit()
+def glm_models(data_):
+    """
+    TO DO
+
+    Parameters
+    ----------
+    data_ : TYPE
+        DESCRIPTION.
+        The column containing the response variable shall be named 'Metric'.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+    TYPE
+        DESCRIPTION.
+    TYPE
+        DESCRIPTION.
+
+    """
+    glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
+    glm_quadratic_age = sm.GLM.from_formula('Metric ~ Age + Age_squared + Gender', data_).fit()
+    glm_interaction = sm.GLM.from_formula('Metric ~ Age + Gender + Age*Gender', data_).fit()
+    # print(glm_linear_age.summary())
+    # print(glm_quadratic_age.summary())
+    # print(glm_interaction.summary())
+    return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues))), np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_quadratic_age.fittedvalues))), np.array(data['Metric'] - (glm_interaction.fittedvalues - np.mean(glm_interaction.fittedvalues)))
+
+#%% 
+measures_subjects = {}
+for metric in local_metrics:
+    measures_subjects[metric] = np.vstack((measures_patients[metric], measures_controls[metric]))
+for metric in global_metrics:
+    measures_subjects[metric] = np.hstack((metrics_patients[metric], metrics_controls[metric]))
+    
+data = pd.DataFrame({
+    "Intercept": np.ones(subject_count),
+    "Age": age - np.mean(age, axis=0),
+    "Age_squared": (age - np.mean(age, axis=0)) ** 2,
+    "Gender": gender,
+    "Metric": np.zeros(subject_count)
+    })
+
+fitted_linear_measures_subjects = {}
+fitted_quadratic_measures_subjects = {}
+fitted_intersection_measures_subjects = {}
+for metric in global_metrics:
+    data["Metric"] = measures_subjects[metric]
+    fitted_linear_measures_subjects[metric], fitted_quadratic_measures_subjects[metric], fitted_intersection_measures_subjects[metric] = glm_models(data)
+for metric in local_metrics:
+    fitted_linear_measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
+    fitted_quadratic_measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
+    fitted_intersection_measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
+    for region in tqdm(range(nb_ROI)):
+        data["Metric"] = measures_subjects[metric][:, region]
+        fitted_linear_measures_subjects[metric][:, region], fitted_quadratic_measures_subjects[metric][:, region], fitted_intersection_measures_subjects[metric][:, region] = glm_models(data)
+
+#%%
+fitted_measures_patients = {}
+fitted_measures_controls = {}
+for metric in local_metrics:
+    fitted_measures_patients[metric] = fitted_linear_measures_subjects[metric][:patients_count, :]
+    fitted_measures_controls[metric] = fitted_linear_measures_subjects[metric][patients_count:, :]
+for metric in global_metrics:
+    fitted_measures_patients[metric] = fitted_linear_measures_subjects[metric][:patients_count]
+    fitted_measures_controls[metric] = fitted_linear_measures_subjects[metric][patients_count:]
+    
+#%% Reproduction
+mean_measures_patients = {} # mean value of the measures per region
+std_measures_patients = {} # standard deviation of the measures per region
+for measure in fitted_measures_patients.keys():
+    if measure in local_metrics:
+        mean_measures_patients[measure] = np.mean(fitted_measures_patients[measure], axis=0)
+        std_measures_patients[measure] = np.std(fitted_measures_patients[measure], axis=0)
+            
+mean_measures_controls = {} # mean value of the measures per region
+std_measures_controls = {} # standard deviation of the measures per region
+for measure in fitted_measures_patients.keys():
+    if measure in local_metrics:
+        mean_measures_controls[measure] = np.mean(fitted_measures_controls[measure], axis=0)
+        std_measures_controls[measure] = np.std(fitted_measures_controls[measure], axis=0)
+    
+#%% Statistical test for each region
+p_value_region = {}
+for measure in local_metrics:
+    p_value_region[measure] = np.zeros((nb_ROI))
+    for region_count in range(nb_ROI):
+        _, p_value_region[measure][region_count] = sp.stats.ttest_ind(fitted_measures_patients[measure][:, region_count], fitted_measures_controls[measure][:, region_count], permutations=5000, equal_var=False)
+
+_, p_value_region['charac_path'] = sp.stats.ttest_ind(metrics_patients['charac_path'], metrics_controls['charac_path'], permutations=5000, equal_var=False)
+_, p_value_region['global_efficiency'] = sp.stats.ttest_ind(metrics_patients['global_efficiency'], metrics_controls['global_efficiency'], permutations=5000, equal_var=False)
+_, p_value_region['global_clust_coef'] = sp.stats.ttest_ind(metrics_patients['global_clust_coef'], metrics_controls['global_clust_coef'], permutations=5000, equal_var=False)
+_, p_value_region['global_strength'] = sp.stats.ttest_ind(metrics_patients['global_strength'], metrics_controls['global_strength'], permutations=5000, equal_var=False)
+
+for measure in p_value_region.keys():
+    if measure in local_metrics:
+        print(measure, "- Number of p_value inferior to 0.05/80:", (p_value_region[measure] < 0.05/80).sum())
+        
+#%% Plot values and significant differences - Local measures
+atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
+
+measures_networks = ['Clustering coefficient',
+                     'Local efficiency',
+                     'Degree',
+                     'Betweenness centrality',
+                     'Participation coefficient',
+                     #'Net resilience (average neighbor degree)',
+                     'Node curvature',
+                     'Strength']
+
+i=0
+for measure in mean_measures_controls.keys():
+    plt.figure(figsize=(18, 5))
+    plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
+    plt.fill_between(np.linspace(0,79,80), 
+                     mean_measures_controls[measure] - std_measures_controls[measure], 
+                     mean_measures_controls[measure] + std_measures_controls[measure],
+                     alpha=0.25,
+                     color='cyan',
+                     edgecolor='steelblue',
+                     linewidth=2)
+    
+    plt.plot(mean_measures_patients[measure], marker='o', color='black', label='patients')
+    plt.fill_between(np.linspace(0,79,80), 
+                     mean_measures_patients[measure] - std_measures_patients[measure], 
+                     mean_measures_patients[measure] + std_measures_patients[measure],
+                     alpha=0.5,
+                     color='darkgray',
+                     edgecolor='dimgray',
+                     linewidth=2)
+    
+    for region_count in range(nb_ROI):
+        if measure != 'charac_path' and measure != 'global_efficiency':
+            # Bonferroni correction
+            if p_value_region[measure][region_count] < 0.05/80:
+                plt.axvline(x=region_count, linestyle='--', color='red')
+    plt.ylabel(measures_networks[i])
+    plt.xlabel('Regions of Interest (80 ROIs)')
+    plt.title(measures_networks[i], fontweight='bold', loc='center', fontsize=16)
+    plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+    plt.legend()
+    # plt.savefig('brain_connectivity_analysis/graph pictures on good matrices/' + measures_networks[i] + '.png', dpi=600)
+    plt.show()
+    
+    fig = plt.figure(figsize=(6, 2.75))
+    
+    matrix_map, atlas_threshold = apply_threshold(p_value_region[measure], atlas_region_coords)
+    disp = plotting.plot_connectome(matrix_map, 
+                                    atlas_threshold,
+                                    figure=fig)
+
+    #disp.savefig('brain_connectivity_analysis/graph pictures on good matrices/' + measures_networks[i] + '_brain', dpi=600)
+    plotting.show()
+    i+=1
+    
+#%% t-test on connections
+#%% Apply GLM
+
+data = pd.DataFrame({
+    "Intercept": np.ones(subject_count),
+    "Age": age - np.mean(age, axis=0),
+    "Age_squared": (age - np.mean(age, axis=0)) ** 2,
+    "Gender": gender,
+    "Metric": np.zeros(subject_count)
+    })
+
+fitted_linear_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
+fitted_quadratic_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
+fitted_intersection_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
+for i in tqdm(range(nb_ROI)):
+    for j in range(nb_ROI):
+        if np.sum(connections_subjects[i, j, :]) != 0:
+            data["Metric"] = connections_subjects[i, j, :]
+            fitted_linear_connections_subjects[i, j, :], fitted_quadratic_connections_subjects[i, j, :], fitted_intersection_connections_subjects[i, j, :] = glm_models(data)
+        
+#%% 2. t-test
+p_value_connection = np.zeros((nb_ROI, nb_ROI))
+statistics = np.zeros((nb_ROI, nb_ROI))
+for i in tqdm(range(nb_ROI)):
+    for j in range(nb_ROI): 
+        statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, :patients_count], fitted_linear_connections_subjects[i, j, patients_count:], equal_var=False)
+        
+p_value_connection_bounded = copy.deepcopy(p_value_connection)
+p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
+np.fill_diagonal(p_value_connection_bounded, 1)
+# dirty
+p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
+plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+plt.title('Ttest par connexion, p < 0.001')
+#plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
+plt.show()
+#%% Linear age-related changes
+#glm = sm.GLM.from_formula('global_efficiency~' + '+'.join(data.columns.difference(['global_efficiency', 'Intercept'])), data).fit()
+glm = sm.GLM.from_formula('Metric ~ Age + Gender', data).fit()
 print(glm.summary())
 plot_fittedvalues(y, glm)
+plt.plot(y)
+plt.plot(glm.fittedvalues)
+plt.plot(y-(glm.fittedvalues - np.mean(glm.fittedvalues)))
+plt.show()
 #%% Quadratic age-related changes
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
     "Age_squared": (age - np.mean(age, axis=0)) ** 2,
     "Gender": gender,
-    "global_efficiency": np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
+    "Metric": np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
     })
 
-glm = sm.GLM.from_formula('global_efficiency~' + '+'.join(data.columns.difference(['global_efficiency', 'Intercept'])), data).fit()
+glm = sm.GLM.from_formula('Metric~' + '+'.join(data.columns.difference(['Metric', 'Intercept'])), data).fit()
 print(glm.summary())
 plot_fittedvalues(y, glm)
 
 #%% Sex-related difference
-glm = sm.GLM.from_formula('global_efficiency ~ Age + Gender + Age*Gender', data).fit()
+glm = sm.GLM.from_formula('Metric ~ Age + Gender + Age*Gender', data).fit()
 print(glm.summary())
-plot_fittedvalues(y, glm)
-
+#plot_fittedvalues(y, glm)
+plt.plot(y, label='values')
+plt.plot(y - glm.fittedvalues, label='fitted values')
+plt.axvline(x=patients_count, linestyle='--', color='red', label='Patients/Controls separation')
+plt.ylabel('Global efficiency')
+plt.xlabel('Subject')
+plt.legend()
+plt.grid(False)
+plt.show()
 #%%
 '''
 #%% Mean and std measures of each region
