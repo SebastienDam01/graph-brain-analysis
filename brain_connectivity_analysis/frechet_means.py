@@ -31,21 +31,24 @@ with open('manage_data/volumes_preprocessed.pickle', 'rb') as f:
 nb_ROI = len(connectivity_matrices[patients[0]])
 
 # TEMPORARY
-subjects_to_delete = ['lgp_164AS', 
-                      'lgp_080FD', 
-                      'lgp_081LJ', 
+subjects_to_delete = ['lgp_081LJ',
                       'lgp_096MS',
-                      'lgp_129LN',
-                      'lgp_086CA']
+                      'lgp_086CA',
+                      'S168',
+                      'EMODES_003LS', # no info on excel
+                      'EMODES_004ML']
 
 for subject in subjects_to_delete:
     if subject in patients:
         patients.remove(subject)
+        patients_count -= 1
     else:
+        print(subject)
         controls.remove(subject)
+        controls_count -= 1
         
 subject_count = subject_count - len(subjects_to_delete)
-patients_count = patients_count - len(subjects_to_delete)
+# patients_count = patients_count - len(subjects_to_delete)
 
 connectivity_matrices = dict([(key, val) for key, val in 
            connectivity_matrices.items() if key not in subjects_to_delete])
@@ -226,13 +229,14 @@ for _ in tqdm(range(100)):
             if p_values_mat[i, j] < 0.001:
                 F[i, j] += 1
                 
+np.fill_diagonal(F, 0)
 #%%
 plt.imshow(F, cmap='YlOrBr')
 plt.grid(False)
 plt.colorbar(label="Nombre de connexions significatives")
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/frechet_means.png', dpi=600)
+plt.savefig('brain_connectivity_analysis/graph_pictures/frechet_means.png', dpi=600)
 plt.show()
 
 #%% Brain visualization
@@ -244,5 +248,5 @@ F_threshold, atlas_threshold = apply_threshold(F, 10, atlas_region_coords)
 disp = plotting.plot_connectome(F_threshold, 
                                 atlas_threshold,
                                 figure=fig)
-disp.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/frechet_mean_brain.png', dpi=600)
+disp.savefig('brain_connectivity_analysis/graph_pictures/frechet_mean_brain.png', dpi=600)
 plotting.show()

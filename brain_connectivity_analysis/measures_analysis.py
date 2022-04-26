@@ -56,6 +56,9 @@ subject_count = subject_count - len(subjects_to_delete)
 connectivity_matrices = dict([(key, val) for key, val in 
            connectivity_matrices.items() if key not in subjects_to_delete])
 
+volumes_ROI = dict([(key, val) for key, val in 
+           volumes_ROI.items() if key not in subjects_to_delete])
+
 # Density fibers connectivity matrices
 def nb_fiber2density(matrices, volumes):
     n = list(matrices.items())[0][1].shape[0]
@@ -64,7 +67,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 0] + volumes[subject][j, 0])
+                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
 
@@ -694,6 +697,17 @@ connectivity_matrices_wo_threshold = copy.deepcopy(connectivity_matrices)
 count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
 connectivity_matrices = nb_fiber2density(connectivity_matrices, volumes_ROI)
 
+#%%
+dist_connection = {}
+for subject in count_parsimonious.keys():
+    dist_connection[subject] = len(count_parsimonious[subject])
+#%%
+plt.figure(figsize=(4, 5))
+df = pd.DataFrame.from_dict(dist_connection, orient='index', columns=['edges_removed'])
+df = df.sort_values(by=['edges_removed'], ascending=False)
+sns.boxplot(y='edges_removed',
+            orient='v',
+            data=df)
 #%% Distribution of connections thresholded
 dist_connection = {}
 for subject in count_parsimonious.keys():
@@ -709,6 +723,36 @@ sns.barplot(x=df.index,
 plt.ylabel('Number of edges removed')
 plt.xticks(rotation=80)
 plt.tight_layout()
+plt.title('Distribution of the number of edges removed per subject (> 100)')
+# plt.savefig('graph_pictures/distribution_threshold.png', dpi=600)
+plt.show()
+#%% Distribution of volumes per region
+dist_volumes = np.zeros((subject_count, nb_ROI))
+for region in range(nb_ROI):
+    subject_idx = 0
+    for key, mat in volumes_ROI.items():
+        dist_volumes[subject_idx, region] = mat[region, 0]
+        subject_idx += 1
+        
+mean_volumes = np.zeros((nb_ROI))
+std_volumes = np.zeros((nb_ROI))
+for i in range(nb_ROI):
+    mean_volumes[i] = np.mean(dist_volumes[:, i])
+    std_volumes[i] = np.std(dist_volumes[:, i])
+  
+plt.figure(figsize=(18, 5))
+plt.plot(mean_volumes, marker='o', color='black')
+plt.fill_between(np.linspace(0,79,80), 
+                 mean_volumes - std_volumes, 
+                 mean_volumes + std_volumes,
+                 alpha=0.5,
+                 color='darkgray',
+                 edgecolor='dimgray',
+                 linewidth=2)
+plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+plt.ylabel('Volume')
+plt.xlabel('ROIs')
+plt.grid(False)
 plt.show()
 ##############################
 #%% Graph metrics analysis
@@ -1249,8 +1293,8 @@ for measure in local_metrics:
     for region_count in range(nb_ROI):
         _, p_value_region[measure][region_count] = sp.stats.ttest_ind(fitted_measures_patients[measure][:, region_count], fitted_measures_controls[measure][:, region_count], permutations=5000, equal_var=False)
 
-_, p_value_region['charac_path'] = sp.stats.ttest_ind(metrics_patients['charac_path'], metrics_controls['charac_path'], permutations=5000, equal_var=False)
-_, p_value_region['global_efficiency'] = sp.stats.ttest_ind(metrics_patients['global_efficiency'], metrics_controls['global_efficiency'], permutations=5000, equal_var=False)
+stat, p_value_region['charac_path'] = sp.stats.ttest_ind(metrics_patients['charac_path'], metrics_controls['charac_path'], permutations=5000, equal_var=False)
+stat, p_value_region['global_efficiency'] = sp.stats.ttest_ind(metrics_patients['global_efficiency'], metrics_controls['global_efficiency'], permutations=5000, equal_var=False)
 _, p_value_region['global_clust_coef'] = sp.stats.ttest_ind(metrics_patients['global_clust_coef'], metrics_controls['global_clust_coef'], permutations=5000, equal_var=False)
 _, p_value_region['global_strength'] = sp.stats.ttest_ind(metrics_patients['global_strength'], metrics_controls['global_strength'], permutations=5000, equal_var=False)
 
@@ -1301,7 +1345,7 @@ for measure in mean_measures_controls.keys():
     plt.title(measures_networks[i], fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
-    # plt.savefig('brain_connectivity_analysis/graph pictures on good matrices/' + measures_networks[i] + '.png', dpi=600)
+    # plt.savefig('graph_pictures/' + measures_networks[i] + '.png', dpi=400)
     plt.show()
     
     fig = plt.figure(figsize=(6, 2.75))
@@ -1311,7 +1355,7 @@ for measure in mean_measures_controls.keys():
                                     atlas_threshold,
                                     figure=fig)
 
-    #disp.savefig('brain_connectivity_analysis/graph pictures on good matrices/' + measures_networks[i] + '_brain', dpi=600)
+    disp.savefig('graph_pictures/' + measures_networks[i] + '_brain', dpi=400)
     plotting.show()
     i+=1
     
@@ -1340,7 +1384,7 @@ p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
     for j in range(nb_ROI): 
-        statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, :patients_count], fitted_linear_connections_subjects[i, j, patients_count:], equal_var=False)
+        statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count], equal_var=False)
         
 p_value_connection_bounded = copy.deepcopy(p_value_connection)
 p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
@@ -1348,19 +1392,104 @@ np.fill_diagonal(p_value_connection_bounded, 1)
 # dirty
 p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('Ttest par connexion, p < 0.001')
-#plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
+#plt.title('Ttest par connexion, p < 0.001')
+# plt.savefig('graph_pictures/ttest_connections.png', dpi=600)
 plt.show()
+
+#%% Heatmap 
+'''
+For large positive t-score, we have evidence that patients mean is greater than the controls mean. 
+'''
+significant_t_score = copy.deepcopy(statistics)
+significant_t_score[p_value_connection_bounded_inverse == 0] = 0
+plt.imshow(significant_t_score, cmap='bwr')
+plt.colorbar(label="t-statistic")
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+# plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
+plt.show()
+
+#%% 
+fig = plt.figure(figsize=(8, 4))
+
+plt.subplot(1, 2, 1)
+plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+
+plt.subplot(1, 2, 2)
+plt.imshow(significant_t_score, cmap='bwr')
+plt.colorbar(label="t-statistic", fraction=0.055, pad=0.04)
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+
+# plt.savefig('graph_pictures/ttest_connections.png', dpi=600)
+plt.show()
+#%% Retrieve direction of significance in significant ROIs
+significant_ROIs = np.argwhere(p_value_connection_bounded_inverse != 0)
+# Remove duplicate rows and pairs
+dupli_rows = []
+for i in range(significant_ROIs.shape[0]):
+    if significant_ROIs[i, 0] == significant_ROIs[i, 1]:
+        dupli_rows.append(i)
+    for j in range(i, significant_ROIs.shape[0]):
+        if i!=j and j not in dupli_rows and significant_ROIs[i, 0] == significant_ROIs[j, 1] and significant_ROIs[i, 1] == significant_ROIs[j, 0]:
+            dupli_rows.append(j)
+            
+significant_ROIs = np.delete(significant_ROIs, dupli_rows, 0)
+
+mean_connections_patients = np.mean(connections_patients, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+std_connections_patients = np.std(connections_patients, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+mean_connections_controls = np.mean(connections_controls, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+std_connections_controls = np.std(connections_controls, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+
+#%% Idem but with a different style of plot (preferable)
+mean_diff_weights = mean_connections_patients - mean_connections_controls
+mean_supp_weights = copy.deepcopy(mean_diff_weights)
+mean_inf_weights = copy.deepcopy(mean_diff_weights)
+for i in range(significant_ROIs.shape[0]):
+    if mean_diff_weights[i] < 0:
+        mean_supp_weights[i] = 0
+    else:
+        mean_inf_weights[i] = 0
+    
+fig, ax = plt.subplots()
+fig.set_size_inches(20, 5)
+x = np.arange(significant_ROIs.shape[0])
+ax.vlines(x, 0, mean_supp_weights, color='g', label='patients edges > controls edges')
+ax.vlines(x, mean_inf_weights, 0, color='r')
+xlabel = [str(x) for x in significant_ROIs]
+ax.set_xticks(x)
+ax.set_xticklabels(xlabel, rotation=70)
+plt.ylabel('Difference of mean density between patients and controls')
+plt.xlabel('Connection')
+plt.legend()
+# plt.savefig('graph_pictures/mean_diff_weights.png', dpi=600)
+plt.show()
+
 #%% Linear age-related changes
 #glm = sm.GLM.from_formula('global_efficiency~' + '+'.join(data.columns.difference(['global_efficiency', 'Intercept'])), data).fit()
 glm = sm.GLM.from_formula('Metric ~ Age + Gender', data).fit()
 print(glm.summary())
-plot_fittedvalues(y, glm)
-plt.plot(y)
-plt.plot(glm.fittedvalues)
+plt.plot(y, label='values')
+#plt.plot(glm.fittedvalues, label='fitted values (y hat)')
 plt.plot(y-(glm.fittedvalues - np.mean(glm.fittedvalues)))
+plt.axvline(x=patients_count, linestyle='--', color='red', label='Patients/Controls separation')
+plt.ylabel('Global efficiency')
+plt.xlabel('Subject')
+plt.legend()
+plt.grid(False)
+
 plt.show()
 #%% Quadratic age-related changes
 data = pd.DataFrame({
