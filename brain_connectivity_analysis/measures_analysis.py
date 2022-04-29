@@ -67,7 +67,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
+                mat[i, j] = mat[i, j] / (volumes[subject][i, 0] + volumes[subject][j, 0])
     
     return densities
 
@@ -984,7 +984,7 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('Ttest par connexion, p < 0.001')
+plt.title('t-test par connexion, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
 
@@ -1383,9 +1383,12 @@ for i in tqdm(range(nb_ROI)):
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
-    for j in range(nb_ROI): 
+    for j in range(i+1, nb_ROI): 
         statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count], equal_var=False)
         
+# copy upper triangle to lower to obtain symmetric matrix
+p_value_connection = p_value_connection + p_value_connection.T - np.diag(np.diag(p_value_connection))
+#%%
 p_value_connection_bounded = copy.deepcopy(p_value_connection)
 p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
 np.fill_diagonal(p_value_connection_bounded, 1)
@@ -1396,7 +1399,7 @@ plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-#plt.title('Ttest par connexion, p < 0.001')
+#plt.title('t-test par connexion, p < 0.001')
 # plt.savefig('graph_pictures/ttest_connections.png', dpi=600)
 plt.show()
 
