@@ -439,35 +439,6 @@ plt.xticks(threshold_grid)
 plt.legend()
 plt.show()
 
-#%%
-fig, ax = plt.subplots()
-cmap = mpl.cm.get_cmap('Paired', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
-im = plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap=cmap, vmin=0, vmax=len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])), aspect=1, interpolation="none")
-fig.colorbar(im, ticks=range(len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT]))), orientation="horizontal", fraction=0.05, pad=0.18)
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
-plt.xlabel('ROIs')
-plt.ylabel('ROIs')
-plt.show()
-#%%
-plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap='gray')
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
-plt.xlabel('ROIs')
-plt.ylabel('ROIs')
-plt.title('NBS, threshold=4.8')
-plt.show()
-
-fig = plt.figure(figsize=(6, 2.75))
-
-atlas_threshold = apply_threshold(adj_grid[OPTIMAL_THRESHOLD_COUNT], atlas_region_coords)
-disp = plotting.plot_connectome(adj_grid[OPTIMAL_THRESHOLD_COUNT], 
-                                atlas_threshold,
-                                figure=fig)
-
-# disp.savefig('brain_connectivity_analysis/graph_pictures/' + measures_networks[i] + '_brain', dpi=600)
-plotting.show()
-
 #%% Switcher class for multiple algorithms
 # https://www.davidsbatista.net/blog/2018/02/23/model_optimization/
 from sklearn.model_selection import GridSearchCV
@@ -569,29 +540,147 @@ params1 = {
 }
 
 #%% Estimation
-for scoring in ['f1', 'roc_auc']:
-    print('Computing scores for {}.'.format(scoring))
-    ind = np.where(np.triu(adj_grid[OPTIMAL_THRESHOLD_COUNT] != 0))
-    X = np.zeros((subject_count, len(ind[0])))
-    y = np.zeros(subject_count)
-    
-    for i, (key, mat) in enumerate(connectivity_matrices.items()):
-        X[i, :] = mat[ind]
-        y[i] = 0 if key in controls else 1
+results_auc = []
+results_f1 = []
+for thresh in tqdm(range(nb_grid)):
+    for scoring in ['f1', 'roc_auc']:
+        # print('Computing scores for {}.'.format(scoring))
+        ind = np.where(np.triu(adj_grid[thresh] != 0))
+        X = np.zeros((subject_count, len(ind[0])))
+        y = np.zeros(subject_count)
         
-    helper1 = EstimatorSelectionHelper(models1, params1)
-    helper1.fit(X, y, scoring=scoring, n_jobs=8, verbose=0)
-    
-    if scoring == 'f1':
-        results_f1 = helper1.score_summary(sort_by='mean_score')
-    else:
-        results_auc = helper1.score_summary(sort_by='mean_score')
+        for i, (key, mat) in enumerate(connectivity_matrices.items()):
+            X[i, :] = mat[ind]
+            y[i] = 0 if key in controls else 1
+            
+        helper1 = EstimatorSelectionHelper(models1, params1)
+        helper1.fit(X, y, scoring=scoring, n_jobs=8, verbose=0)
+        
+        if scoring == 'f1':
+            results_f1.append(helper1.score_summary(sort_by='mean_score'))
+        else:
+            results_auc.append(helper1.score_summary(sort_by='mean_score'))
             
 #%% Plot
-best_results_auc = results_auc.drop_duplicates(subset='estimator')
-plt.figure(figsize=(10, 5))
-sns.lineplot(x='estimator', y='mean_score', data=best_results_auc)
-plt.xticks(results_auc.estimator, rotation=70)
+# https://stackoverflow.com/questions/71794028/how-can-i-adjust-the-hue-of-a-seaborn-lineplot-without-having-it-connect-to-the
+# frame : https://stackoverflow.com/questions/34318110/in-pythons-seaborn-is-there-any-way-to-do-the-opposite-of-despine
+best_results_auc = pd.DataFrame(index=range(nb_grid), columns=range(3))
+best_results_auc.columns = ['Estimator', 'AUC', 'Std']
+for i in range(nb_grid):
+    best_results_auc.iloc[i, :] = results_auc[i].iloc[0, :3]
+best_results_auc['Threshold'] = threshold_grid
+
+fig = plt.figure(figsize=(20, 5))
+plt.subplot(1, 2, 1)
+ax = sns.lineplot(data=best_results_auc,
+                  x='Threshold', 
+                  y='AUC',
+                  color='black',
+                  alpha=0.25
+                  )
+sns.scatterplot(data=best_results_auc,
+             x='Threshold', 
+             y='AUC',
+             s=40,
+             hue='Estimator',
+             ax=ax
+            )
+ax.set_facecolor('white')
+sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
+plt.xticks(np.arange(4, 6.1, 0.2))
+plt.title('Threshold effect for AUC')
+
+best_results_f1 = pd.DataFrame(index=range(nb_grid), columns=range(3))
+best_results_f1.columns = ['Estimator', 'f1', 'Std']
+for i in range(nb_grid):
+    best_results_f1.iloc[i, :] = results_f1[i].iloc[0, :3]
+best_results_f1['Threshold'] = threshold_grid
+
+plt.subplot(1, 2, 2)
+#plt.figure(figsize=(10, 5))
+ax = sns.lineplot(data=best_results_f1,
+                  x='Threshold', 
+                  y='f1',
+                  color='black',
+                  alpha=0.25
+                  )
+sns.scatterplot(data=best_results_f1,
+             x='Threshold', 
+             y='f1',
+             s=40,
+             hue='Estimator',
+             ax=ax
+            )
+ax.set_facecolor('white')
+sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
+plt.xticks(np.arange(4, 6.1, 0.2))
+plt.title('Threshold effect for f1')
+
+plt.savefig('graph_pictures/NBS_threshold.png', dpi=600)
+plt.show()
+
+#%%
+fig, ax = plt.subplots()
+cmap = mpl.cm.get_cmap('Paired', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
+im = plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap=cmap, vmin=0, vmax=len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])), aspect=1, interpolation="none")
+fig.colorbar(im, ticks=range(len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT]))), orientation="horizontal", fraction=0.05, pad=0.18)
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+plt.show()
+#%%
+plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap='gray')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+plt.title('NBS, threshold={:,.1f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
+plt.show()
+
+degree = adj_grid[OPTIMAL_THRESHOLD_COUNT] @ np.ones(80) / 2
+degree[degree == 0.5] = 1
+node_size = degree * 20
+
+# # True degrees
+# significant_ROIs = np.argwhere(adj_grid[OPTIMAL_THRESHOLD_COUNT] != 0)
+# # Remove duplicate rows and pairs
+# dupli_rows = []
+# for i in range(significant_ROIs.shape[0]):
+#     if significant_ROIs[i, 0] == significant_ROIs[i, 1]:
+#         dupli_rows.append(i)
+#     for j in range(i, significant_ROIs.shape[0]):
+#         if i!=j and j not in dupli_rows and significant_ROIs[i, 0] == significant_ROIs[j, 1] and significant_ROIs[i, 1] == significant_ROIs[j, 0]:
+#             dupli_rows.append(j)
+# significant_ROIs = np.delete(significant_ROIs, dupli_rows, 0)
+
+# unique, counts = np.unique(significant_ROIs.flatten(), return_counts=True)
+# print(dict(zip(unique, counts)))
+
+fig = plt.figure(figsize=(6, 2.75))
+
+atlas_threshold = apply_threshold(adj_grid[OPTIMAL_THRESHOLD_COUNT], atlas_region_coords)
+disp = plotting.plot_connectome(adj_grid[OPTIMAL_THRESHOLD_COUNT], 
+                                atlas_threshold,
+                                node_size=node_size,
+                                figure=fig)
+
+# disp.savefig('graph_pictures/' + 'nbs' + '_brain.png', dpi=600)
+plotting.show()
+
+#%% Heatmap modified
+significant_t_score = copy.deepcopy(statistics)
+significant_t_score[adj_grid[OPTIMAL_THRESHOLD_COUNT] == 0] = 0
+significant_t_score = significant_t_score + significant_t_score.T - np.diag(np.diag(significant_t_score))
+
+plt.imshow(significant_t_score, cmap='copper')
+plt.colorbar(label="t-statistic")
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+plt.title('Heatmap of t-score, NBS corrected')
+#plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
 plt.show()
 #%% BCT ttest
 
@@ -679,8 +768,21 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
 plt.title('t-test par connexion, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
 
+#%% Heatmap
+significant_t_score = copy.deepcopy(statistics)
+significant_t_score[p_value_connection_bounded_inverse == 0] = 0
+plt.imshow(significant_t_score, cmap='bwr')
+plt.colorbar(label="t-statistic")
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+# plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
+plt.show()
 #%% DDT
