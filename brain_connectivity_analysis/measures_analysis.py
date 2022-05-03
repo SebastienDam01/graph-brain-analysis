@@ -1403,12 +1403,23 @@ plt.ylabel('ROIs')
 # plt.savefig('graph_pictures/ttest_connections.png', dpi=600)
 plt.show()
 
+fig = plt.figure(figsize=(6, 2.75))
+
+atlas_threshold = apply_threshold(p_value_connection_bounded_inverse, atlas_region_coords)
+disp = plotting.plot_connectome(p_value_connection_bounded_inverse, 
+                                atlas_threshold,
+                                figure=fig)
+
+disp.savefig('graph_pictures/ttest_connections_brain.png', dpi=600)
+plotting.show()
+
 #%% Heatmap 
 '''
 For large positive t-score, we have evidence that patients mean is greater than the controls mean. 
 '''
 significant_t_score = copy.deepcopy(statistics)
 significant_t_score[p_value_connection_bounded_inverse == 0] = 0
+significant_t_score = significant_t_score + significant_t_score.T - np.diag(np.diag(significant_t_score))
 plt.imshow(significant_t_score, cmap='bwr')
 plt.colorbar(label="t-statistic")
 plt.xticks(np.arange(0, 81, 10))
@@ -1427,6 +1438,7 @@ plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
+plt.title("t-test on each connection, p < 0.001 (uncorrected)")
 
 plt.subplot(1, 2, 2)
 plt.imshow(significant_t_score, cmap='bwr')
@@ -1435,8 +1447,9 @@ plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
+plt.title("Corresponding Heatmap")
 
-# plt.savefig('graph_pictures/ttest_connections.png', dpi=600)
+#plt.savefig('graph_pictures/ttest_connections.png', dpi=600)
 plt.show()
 #%% Retrieve direction of significance in significant ROIs
 significant_ROIs = np.argwhere(p_value_connection_bounded_inverse != 0)
