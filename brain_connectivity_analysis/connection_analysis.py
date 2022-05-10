@@ -17,7 +17,7 @@ from tqdm import tqdm
 sns.set()
 
 sys.path.append('../utils')
-from utils import printProgressBar
+#from utils import printProgressBar
 
 THRESHOLD = 0.3
 
@@ -190,7 +190,7 @@ def glm_models(data_):
 #%% Conversion from fiber numbers to density and apply connection threshold
 #for patient in connectivity_matrices.keys():
 connectivity_matrices_wo_threshold = copy.deepcopy(connectivity_matrices)
-count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
+#count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
 connectivity_matrices = nb_fiber2density(connectivity_matrices, volumes_ROI)
 
 #%% 1. Controls' and patients' connections 
@@ -200,12 +200,12 @@ connections_patients = np.zeros((nb_ROI, nb_ROI, patients_count))
 for control_idx in range(controls_count):
     for i in range(nb_ROI):
         for j in range(nb_ROI):
-            connections_controls[i, j, control_idx] = connectivity_matrices_wo_threshold[controls[control_idx]][i][j]
+            connections_controls[i, j, control_idx] = connectivity_matrices[controls[control_idx]][i][j]
 
 for patient_idx in range(patients_count):
     for i in range(nb_ROI):
         for j in range(nb_ROI):
-            connections_patients[i, j, patient_idx] = connectivity_matrices_wo_threshold[patients[patient_idx]][i][j]
+            connections_patients[i, j, patient_idx] = connectivity_matrices[patients[patient_idx]][i][j]
             
 #%% Clinical characteristics 
 dict_keys = list(patient_info_dict.keys())
@@ -297,7 +297,7 @@ for i in tqdm(range(nb_ROI)):
 p_vals = p_value_connection_upper.flatten()
 p_vals = np.delete(p_vals, np.where(p_vals == 0))
 p_vals = np.nan_to_num(p_vals)
-res, pvals_fdr_upper, _, _ = multipletests(p_vals, alpha=0.001, method='fdr_i')
+res, pvals_fdr_upper, _, _ = multipletests(p_vals, alpha=0.05, method='fdr_i')
 
 ind = np.triu_indices(80, k=1)
 pvals_fdr = np.zeros((80,80),float)
@@ -307,14 +307,14 @@ pvals_fdr = pvals_fdr + pvals_fdr.T - np.diag(np.diag(pvals_fdr))
 
 #%%
 p_value_connection_bounded = copy.deepcopy(pvals_fdr)
-p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
+p_value_connection_bounded[p_value_connection_bounded > 0.05] = 1
 np.fill_diagonal(p_value_connection_bounded, 1)
 # dirty
 p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('t-test par connexion, p < 0.001, FDR corrected')
+plt.title('t-test par connexion, p < 0.05, FDR corrected')
 # plt.savefig('graph_pictures/ttest_connections_FDR.png', dpi=600)
 plt.show()
 
@@ -351,49 +351,78 @@ disp = plotting.plot_connectome(p_value_connection_bounded_inverse,
 #disp.savefig('graph_pictures/ttest_connections_Bonferroni_brain.png', dpi=600)
 plotting.show()
 
-#%% Variance 
-var_patients=np.var(fitted_linear_connections_subjects[:, :, patients_count:], ddof=1, axis=-1)
-var_controls=np.var(fitted_linear_connections_subjects[:, :, :patients_count], ddof=1, axis=-1)
+#%% Test of equal variances
+x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
+y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
+tail="both"
+n=nb_ROI
 
-# plt.figure(figsize=(9, 4))
-# plt.subplot(1, 2, 1)
-# plt.imshow(np.log(var_controls),cmap='viridis')
-# plt.xticks(np.arange(0, 81, 10))
-# plt.yticks(np.arange(0, 81, 10))
-# plt.xlabel('ROIs')
-# plt.ylabel('ROIs')
-# plt.title('Variance of connections for controls')
+ix, jx, nx = x.shape
+iy, jy, ny = y.shape
 
-# plt.subplot(1, 2, 2)
-# plt.imshow(np.log(var_patients),cmap='viridis')
-# plt.xticks(np.arange(0, 81, 10))
-# plt.yticks(np.arange(0, 81, 10))
-# plt.xlabel('ROIs')
-# plt.ylabel('ROIs')
-# plt.title('Variance of connections for patients')
+# only consider upper triangular edges
+ixes = np.where(np.triu(np.ones((n, n)), 1))
 
-# plt.show()
+# number of edges
+m = np.size(ixes, axis=1)
 
-ftest_stat, ftest_pvalue = sp.stats.levene(var_controls.flatten(), var_patients.flatten())
-print('levene statistics :', ftest_stat)
-print('levene pvalue :', ftest_pvalue)
+# vectorize connectivity matrices for speed
+xmat, ymat = np.zeros((m, nx)), np.zeros((m, ny))
+
+for i in range(nx):
+    xmat[:, i] = x[:, :, i][ixes].squeeze()
+for i in range(ny):
+    ymat[:, i] = y[:, :, i][ixes].squeeze()
+
+# perform t-test at each edge
+t_stat = np.zeros((m,))
+p_value = np.zeros((m,))
+for i in range(m):
+    t_stat[i], p_value[i] = sp.stats.levene(xmat[i, :], ymat[i, :])
+
+ind = np.triu_indices(80, k=1)
+stats_levene = np.zeros((80,80),float)
+stats_levene[ind]=t_stat
+
+stats_levene = stats_levene + stats_levene.T
+
+p_value_levene = np.zeros((80,80),float)
+p_value_levene[ind]=p_value
+
+p_value_levene = p_value_levene + p_value_levene.T
+
+alpha = 0.05
+p_value_levene[p_value_levene > alpha] = 1
+plt.imshow(p_value_levene)
+plt.grid(False)
+plt.title('Test de levene, p = {}'.format(alpha))
+plt.show() 
+
+#print('levene statistics :', ftest_stat)
+#print('levene pvalue :', ftest_pvalue)
 #%% NBS
 import matplotlib as mpl
 import bct
 
-threshold_grid = np.arange(3.33, 4.7, 0.1) # 3 to 4.5 for density
+# proportional threshold, 10 values
+threshold_grid = [0.05, 0.01, 0.001, 0.0005, 0.0002, 0.0001] # for mannwhitneyu test
+# np.arange(0.4, 4.2, 0.4) # for equal variance 
+#np.arange(0.45, 4.6, 0.45) # for inequal variance
+# np.arange(0.4, 4.5, 0.45) # for density
+# [0.01, 0.05, 0.001] # for mannwhitneyu test
 nb_grid = len(threshold_grid)
 pval_grid, adj_grid = [], []
+
 for thresh_grid in threshold_grid:
     print(len(adj_grid))
-    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :patients_count], y=fitted_linear_connections_subjects[:, :, patients_count:], thresh=thresh_grid, k=100)
+    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :patients_count], y=fitted_linear_connections_subjects[:, :, patients_count:], thresh=thresh_grid, method='mannwhitneyu', k=1000)
     pval_grid.append(pval)
     adj_grid.append(adj)
 
 #%%
 for i in range(len(adj_grid)):
     plt.imshow(adj_grid[i])
-    plt.title('NBS, threshold={:,.2f}'.format(threshold_grid[i]))
+    plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[i]))
     plt.show()
 
 #%% Switcher class for multiple algorithms
@@ -413,7 +442,7 @@ class EstimatorSelectionHelper:
 
     def fit(self, X, y, cv=10, n_jobs=6, verbose=1, scoring=None, refit=False):
         for key in self.keys:
-            # print("Running GridSearchCV for %s." % key)
+            print("Running GridSearchCV for %s." % key)
             model = self.models[key]
             params = self.params[key]
             gs = GridSearchCV(model, params, cv=cv, n_jobs=n_jobs,
@@ -433,7 +462,7 @@ class EstimatorSelectionHelper:
 
         rows = []
         for k in self.grid_searches:
-            # print(k)
+            print(k)
             params = self.grid_searches[k].cv_results_['params']
             scores = []
             for i in range(self.grid_searches[k].cv):
@@ -466,10 +495,10 @@ models1 = {
     'RandomForestClassifier': RandomForestClassifier(),
     'ExtraTreesClassifier': ExtraTreesClassifier(),
     'AdaBoostClassifier': AdaBoostClassifier(),
-    'SVC': SVC(),
+    #'SVC': SVC(),
     #'Ridge': Ridge(),
     'GradientBoostingClassifier': GradientBoostingClassifier(),
-    'LogisticRegression': LogisticRegression(max_iter=1000),
+    #'LogisticRegression': LogisticRegression(max_iter=1000),
     'KNN': KNeighborsClassifier(n_jobs=8),
     'BaggingClassifier': BaggingClassifier()
 }
@@ -480,18 +509,18 @@ params1 = {
     'RandomForestClassifier': { 'n_estimators': [16, 32] },
     'ExtraTreesClassifier': { 'n_estimators': [16, 32] },
     'AdaBoostClassifier':  { 'n_estimators': [16, 32] },
-    'SVC': [
-        {'kernel': ['linear'], 'C': [1, 10]},
-        {'kernel': ['rbf'], 'C': [1, 10], 'gamma': [0.001, 0.0001]},
-    ],
+    # 'SVC': [
+    #     {'kernel': ['linear'], 'C': [1, 10]},
+    #     {'kernel': ['rbf'], 'C': [1, 10], 'gamma': [0.001, 0.0001]},
+    # ],
     #'Ridge': { 'alpha': [1, 2, 4, 6, 8] },
     'GradientBoostingClassifier': { 'n_estimators': [16, 32], 'learning_rate': [0.8, 1.0] },
-    'LogisticRegression': [
-        { 'solver': ['lbfgs'], 'penalty': ['l2'] },
-        {'solver': ['liblinear'], 'penalty': ['l1', 'l2']},
-        {'solver': ['saga'], 'penalty': ['l1', 'l2']},
-        {'solver': ['saga'], 'penalty': ['elasticnet'], 'l1_ratio': [0.4, 0.8]}
-    ], 
+    # 'LogisticRegression': [
+    #     { 'solver': ['lbfgs'], 'penalty': ['l2'] },
+    #     {'solver': ['liblinear'], 'penalty': ['l1', 'l2']},
+    #     {'solver': ['saga'], 'penalty': ['l1', 'l2']},
+    #     {'solver': ['saga'], 'penalty': ['elasticnet'], 'l1_ratio': [0.4, 0.8]}
+    # ], 
     'KNN': { 'n_neighbors': [2, 3, 5, 7, 9, 11, 13] },
     'BaggingClassifier': { 'n_estimators': [16, 32] }
 }
@@ -506,7 +535,7 @@ for thresh in tqdm(range(nb_grid)):
         X = np.zeros((subject_count, len(ind[0])))
         y = np.zeros(subject_count)
         
-        for i, (key, mat) in enumerate(connectivity_matrices.items()):
+        for i, (key, mat) in enumerate(connectivity_matrices_wo_threshold.items()):
             X[i, :] = mat[ind]
             y[i] = 0 if key in controls else 1
             
@@ -553,7 +582,8 @@ sns.scatterplot(data=best_results_auc,
 #              capthick=2)
 ax.set_facecolor('white')
 sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
-plt.xticks(np.arange(3.3, 4.7, 0.2))
+plt.xticks(threshold_grid)
+plt.gca().invert_xaxis()
 plt.title('Threshold effect for AUC')
 
 best_results_f1 = pd.DataFrame(index=range(nb_grid), columns=range(3))
@@ -578,27 +608,28 @@ sns.scatterplot(data=best_results_f1,
              ax=ax
             )
 # plt.errorbar(x=best_results_f1.Threshold, 
-#              y=best_results_f1.f1, 
-#              yerr=best_results_f1.Std,
-#              color='black',
-#              alpha=0.55,
-#              ecolor='red',
-#              lw=2,
-#              capsize=4,
-#              capthick=2)
+#               y=best_results_f1.f1, 
+#               yerr=best_results_f1.Std,
+#               color='black',
+#               alpha=0.55,
+#               ecolor='red',
+#               lw=2,
+#               capsize=4,
+#               capthick=2)
 ax.set_facecolor('white')
 sns.set_style('darkgrid', {'axes.linewidth': 2, 'axes.edgecolor':'black'})
-plt.xticks(np.arange(3.3, 4.7, 0.2))
-plt.ylim(0.55, 1)
+plt.xticks(threshold_grid)
+#plt.ylim(0.55, 1)
+plt.gca().invert_xaxis()
 plt.title('Threshold effect for f1')
 #plt.savefig('graph_pictures/NBS_threshold.png', dpi=600)
 # plt.savefig('graph_pictures/NBS_threshold_with_errorbars.png', dpi=600)
 plt.show()
 
-OPTIMAL_THRESHOLD_COUNT = 6
+OPTIMAL_THRESHOLD_COUNT = 4
 #%%
 fig, ax = plt.subplots()
-cmap = mpl.cm.get_cmap('Paired', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
+cmap = mpl.cm.get_cmap('Accent', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
 im = plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap=cmap, vmin=0, vmax=len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])), aspect=1, interpolation="none")
 fig.colorbar(im, ticks=range(len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT]))), orientation="horizontal", fraction=0.05, pad=0.18)
 plt.xticks(np.arange(0, 81, 10))
@@ -606,20 +637,13 @@ plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('NBS, threshold={:,.2f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-# plt.savefig('graph_pictures/' + 'nbs' + '.png', dpi=600)
-plt.show()
-#%%
-plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap='gray')
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
-plt.xlabel('ROIs')
-plt.ylabel('ROIs')
-plt.title('NBS, threshold={:,.2f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
+#plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=600)
 plt.show()
 
-degree = adj_grid[OPTIMAL_THRESHOLD_COUNT] @ np.ones(80) / 2
-degree[degree == 0.5] = 1
-node_size = degree * 15
+threshold_adj = copy.deepcopy(adj_grid[OPTIMAL_THRESHOLD_COUNT])
+threshold_adj[threshold_adj != 0] = 1 
+degree = threshold_adj @ np.ones(80)
+node_size = degree * 50
 
 # # True degrees
 # significant_ROIs = np.argwhere(adj_grid[OPTIMAL_THRESHOLD_COUNT] != 0)
@@ -642,9 +666,10 @@ atlas_threshold = apply_threshold(adj_grid[OPTIMAL_THRESHOLD_COUNT], atlas_regio
 disp = plotting.plot_connectome(adj_grid[OPTIMAL_THRESHOLD_COUNT], 
                                 atlas_threshold,
                                 node_size=node_size,
+                                edge_cmap='Accent',
                                 figure=fig)
 
-#disp.savefig('graph_pictures/' + 'nbs' + '_brain.png', dpi=600)
+#disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
 plotting.show()
 
 #%% Heatmap modified
@@ -663,24 +688,23 @@ plt.title('Heatmap of t-score, NBS corrected')
 plt.show()
 
 #%% BCT ttest
-
-x=fitted_linear_connections_subjects[:, :, :patients_count] # controls
-y=fitted_linear_connections_subjects[:, :, patients_count:] # patients
+x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
+y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
 tail="both"
 n=nb_ROI
-thresh=3.33
+thresh=3
 
 def ttest2_stat_only(x, y, tail):
     t = np.mean(x) - np.mean(y)
     n1, n2 = len(x), len(y)
-    # s = np.sqrt(((n1 - 1) * np.var(x, ddof=1) + (n2 - 1)
-    #              * np.var(y, ddof=1)) / (n1 + n2 - 2))
-    # denom = s * np.sqrt(1 / n1 + 1 / n2)
-    denom = np.sqrt(np.var(x, ddof=1) / n1 + np.var(y, ddof=1) / n2)
+    s = np.sqrt(((n1 - 1) * np.var(x, ddof=1) + (n2 - 1)
+                  * np.var(y, ddof=1)) / (n1 + n2 - 2))
+    denom = s * np.sqrt(1 / n1 + 1 / n2)
+    # denom = np.sqrt(np.var(x, ddof=1) / n1 + np.var(y, ddof=1) / n2)
     if denom == 0:
         return 0
     if tail == 'both':
-        return np.abs(t / denom)
+        return abs(t / denom)
     if tail == 'left':
         return -t / denom
     else:
@@ -750,8 +774,20 @@ plt.title('t-test par connexion, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
 
+#%% Heatmap
+significant_t_score = copy.deepcopy(stats)
+significant_t_score[p_value_connection_bounded_inverse == 0] = 0
+plt.imshow(significant_t_score, cmap='bwr')
+plt.colorbar(label="t-statistic")
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+#plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
+plt.show()
+
 #%% Threshold selection by classification 
-'''
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import auc, roc_curve, f1_score
@@ -764,7 +800,7 @@ for thresh in tqdm(range(nb_grid)):
     X = np.zeros((subject_count, len(ind[0])))
     y = np.zeros(subject_count)
     
-    for i, (key, mat) in enumerate(connectivity_matrices.items()):
+    for i, (key, mat) in enumerate(connectivity_matrices_wo_threshold.items()):
         X[i, :] = mat[ind]
         y[i] = 0 if key in controls else 1
     
@@ -776,7 +812,7 @@ for thresh in tqdm(range(nb_grid)):
         cls = RandomForestClassifier()
         cls.fit(X_train, y_train)
         y_pred = cls.predict(X_test)
-        fpr, tpr, _ = roc_curve(y_test, y_pred, pos_label=1)
+        fpr, tpr, threshold_roc = roc_curve(y_test, y_pred, pos_label=1)
         auc_grid[thresh].append(auc(fpr, tpr))
         f1_score_grid[thresh].append(f1_score(y_test, y_pred))
         
@@ -799,7 +835,89 @@ plt.fill_between(threshold_grid,
                  edgecolor='dimgray',
                  linewidth=2)
 plt.xticks(threshold_grid)
+plt.xlabel('Threshold')
+plt.ylabel('Classification score')
+plt.title('Classification score for different thresholds')
 plt.legend()
 plt.show()
-'''
-#%% DDT
+
+#%%
+thresh=4
+ind = np.where(np.triu(adj_grid[thresh] != 0))
+X = np.zeros((subject_count, len(ind[0])))
+y = np.zeros(subject_count)
+
+for i, (key, mat) in enumerate(connectivity_matrices_wo_threshold.items()):
+    X[i, :] = mat[ind]
+    y[i] = 0 if key in controls else 1
+
+cv = StratifiedKFold(n_splits=10)
+for train_index, test_index in cv.split(X, y):
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = y[train_index], y[test_index]
+    
+    cls = RandomForestClassifier()
+    cls.fit(X_train, y_train)
+    y_pred = cls.predict(X_test)
+    fpr, tpr, threshold_roc = roc_curve(y_test, y_pred, pos_label=1)
+    auc_grid[thresh].append(auc(fpr, tpr))
+    f1_score_grid[thresh].append(f1_score(y_test, y_pred))
+
+#%%
+# calculate the g-mean for each threshold
+gmeans = np.sqrt(tpr * (1-fpr))
+# locate the index of the largest g-mean
+ix = np.argmax(gmeans)
+print('Best Threshold=%f, G-Mean=%.3f' % (threshold_roc[ix], gmeans[ix]))
+# plot the roc curve for the model
+plt.plot([0,1], [0,1], linestyle='--')
+plt.plot(fpr, tpr, marker='.')
+plt.scatter(fpr[ix], tpr[ix], marker='o', color='black', label='Best')
+# axis labels
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.legend()
+# show the plot
+plt.show()
+
+#%% Mann-Whitney U
+x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
+y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
+
+#%% scipy 
+p_value_connection = np.zeros((nb_ROI, nb_ROI))
+U1 = np.zeros((nb_ROI, nb_ROI))
+for i in tqdm(range(nb_ROI)):
+    for j in range(i+1, nb_ROI): 
+        U1[i,j], p_value_connection[i][j] = sp.stats.mannwhitneyu(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count])
+
+# copy upper triangle to lower to obtain symmetric matrix
+p_value_connection = p_value_connection + p_value_connection.T - np.diag(np.diag(p_value_connection))
+U1 = U1 + U1.T - np.diag(np.diag(U1))
+
+p_value_connection_bounded = copy.deepcopy(p_value_connection)
+p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
+np.fill_diagonal(p_value_connection_bounded, 1)
+# dirty
+p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
+plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.title('t-test par connexion, p < 0.001')
+#plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
+plt.show()
+
+#%% 
+thresh = 0.001
+u_stat, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
+ind_t = np.argwhere(u_pvalue < thresh)
+
+# Compute adjacency matrix
+adj = np.zeros((n, n), dtype=int)      
+for a, b in ind_t:
+    adj[a, b] = 1
+    adj[b, a] = 1
+        
+plt.imshow(adj)

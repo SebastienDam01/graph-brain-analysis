@@ -74,7 +74,7 @@ def nb_fiber2density(matrices, volumes):
 def get_parsimonious_network(matrices, ratio=0.7, ratio_fiber=0):
     """
     Make the matrix more parcimonious by deleting edges depending on the `ratio`
-    and the `ratio_fiber`. 
+    and the `ratio_fiber`. Also knowned as consensus threshold.
 
     Parameters
     ----------
@@ -1206,31 +1206,21 @@ def plot_fittedvalues(y_, model):
 
 def glm_models(data_):
     """
-    TO DO
+    Apply Generalized Linear Model to adjust for confounds.
 
     Parameters
     ----------
-    data_ : TYPE
-        DESCRIPTION.
+    data_ : pandas DataFrame
+        Contains columns for Intercept, confounds and the metric observed (response variable).
         The column containing the response variable shall be named 'Metric'.
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
-    TYPE
-        DESCRIPTION.
-    TYPE
-        DESCRIPTION.
-
+    ndarray
+        Adjusted values for the response variable.
     """
     glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
-    glm_quadratic_age = sm.GLM.from_formula('Metric ~ Age + Age_squared + Gender', data_).fit()
-    glm_interaction = sm.GLM.from_formula('Metric ~ Age + Gender + Age*Gender', data_).fit()
-    # print(glm_linear_age.summary())
-    # print(glm_quadratic_age.summary())
-    # print(glm_interaction.summary())
-    return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues))), np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_quadratic_age.fittedvalues))), np.array(data['Metric'] - (glm_interaction.fittedvalues - np.mean(glm_interaction.fittedvalues)))
+    return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
 
 #%% 
 measures_subjects = {}
@@ -1242,24 +1232,19 @@ for metric in global_metrics:
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
-    "Age_squared": (age - np.mean(age, axis=0)) ** 2,
     "Gender": gender,
     "Metric": np.zeros(subject_count)
     })
 
 fitted_linear_measures_subjects = {}
-fitted_quadratic_measures_subjects = {}
-fitted_intersection_measures_subjects = {}
 for metric in global_metrics:
     data["Metric"] = measures_subjects[metric]
-    fitted_linear_measures_subjects[metric], fitted_quadratic_measures_subjects[metric], fitted_intersection_measures_subjects[metric] = glm_models(data)
+    fitted_linear_measures_subjects[metric] = glm_models(data)
 for metric in local_metrics:
     fitted_linear_measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
-    fitted_quadratic_measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
-    fitted_intersection_measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
     for region in tqdm(range(nb_ROI)):
         data["Metric"] = measures_subjects[metric][:, region]
-        fitted_linear_measures_subjects[metric][:, region], fitted_quadratic_measures_subjects[metric][:, region], fitted_intersection_measures_subjects[metric][:, region] = glm_models(data)
+        fitted_linear_measures_subjects[metric][:, region] = glm_models(data)
 
 #%%
 fitted_measures_patients = {}
@@ -1291,7 +1276,7 @@ p_value_region = {}
 for measure in local_metrics:
     p_value_region[measure] = np.zeros((nb_ROI))
     for region_count in range(nb_ROI):
-        _, p_value_region[measure][region_count] = sp.stats.ttest_ind(fitted_measures_patients[measure][:, region_count], fitted_measures_controls[measure][:, region_count], permutations=5000, equal_var=False)
+        _, p_value_region[measure][region_count] = sp.stats.mannwhitneyu(fitted_measures_patients[measure][:, region_count], fitted_measures_controls[measure][:, region_count])
 
 stat, p_value_region['charac_path'] = sp.stats.ttest_ind(metrics_patients['charac_path'], metrics_controls['charac_path'], permutations=5000, equal_var=False)
 stat, p_value_region['global_efficiency'] = sp.stats.ttest_ind(metrics_patients['global_efficiency'], metrics_controls['global_efficiency'], permutations=5000, equal_var=False)
@@ -1365,19 +1350,16 @@ for measure in mean_measures_controls.keys():
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
-    "Age_squared": (age - np.mean(age, axis=0)) ** 2,
     "Gender": gender,
     "Metric": np.zeros(subject_count)
     })
 
 fitted_linear_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
-fitted_quadratic_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
-fitted_intersection_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
 for i in tqdm(range(nb_ROI)):
     for j in range(nb_ROI):
         if np.sum(connections_subjects[i, j, :]) != 0:
             data["Metric"] = connections_subjects[i, j, :]
-            fitted_linear_connections_subjects[i, j, :], fitted_quadratic_connections_subjects[i, j, :], fitted_intersection_connections_subjects[i, j, :] = glm_models(data)
+            fitted_linear_connections_subjects[i, j, :] = glm_models(data)
         
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
@@ -1511,7 +1493,6 @@ plt.show()
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
-    "Age_squared": (age - np.mean(age, axis=0)) ** 2,
     "Gender": gender,
     "Metric": np.hstack((metrics_patients['global_efficiency'], metrics_controls['global_efficiency']))
     })
@@ -1532,6 +1513,93 @@ plt.xlabel('Subject')
 plt.legend()
 plt.grid(False)
 plt.show()
+
+#%% Permutations on graph measures
+def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
+    p = mat_obs.shape[0]
+    mat_permut = np.zeros((p, ntest))
+    
+    # 1. randomize samples
+    for t in range(ntest):
+        subset_size = len(list_A)
+        concat_subset = list_A + list_B
+        random.shuffle(concat_subset)
+        subset_A, subset_B = concat_subset[:subset_size], concat_subset[subset_size:]
+        
+        mat_permut[:, t], _ = sp.stats.mannwhitneyu(fitted_linear_measures_subjects[measure][subset_A, :], fitted_linear_measures_subjects[measure][subset_B, :])
+        
+    # 2. unnormalized p-value
+    mat_pval = np.zeros((p, ))
+    
+    for j in range(p):
+        mat_pval[j] = np.sum(mat_permut[j, :] >= mat_obs[j]) / ntest
+            
+    return mat_pval
+
+#%% Mann-Whitney U test
+stats_measures = {}
+p_values_mat = {}
+for measure in local_metrics:
+    print(measure)
+    stats_measures[measure] = np.zeros((nb_ROI,))
+    p_values_mat[measure] = np.zeros((nb_ROI,))
+    subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
+    subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
+    
+    for region_count in range(nb_ROI):
+        stats_measures[measure][region_count], _ = sp.stats.mannwhitneyu(fitted_measures_patients[measure][:, region_count], fitted_measures_controls[measure][:, region_count])
+    
+    p_values_mat[measure] = permutation_test(subset_controls,
+                                    subset_patients,
+                                    stats_measures[measure],
+                                    measure,
+                                    5000)
+    
+#%% Plot values and significant differences - Local measures
+i=0
+for measure in mean_measures_controls.keys():
+    plt.figure(figsize=(18, 5))
+    plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
+    plt.fill_between(np.linspace(0,79,80), 
+                     mean_measures_controls[measure] - std_measures_controls[measure], 
+                     mean_measures_controls[measure] + std_measures_controls[measure],
+                     alpha=0.25,
+                     color='cyan',
+                     edgecolor='steelblue',
+                     linewidth=2)
+    
+    plt.plot(mean_measures_patients[measure], marker='o', color='black', label='patients')
+    plt.fill_between(np.linspace(0,79,80), 
+                     mean_measures_patients[measure] - std_measures_patients[measure], 
+                     mean_measures_patients[measure] + std_measures_patients[measure],
+                     alpha=0.5,
+                     color='darkgray',
+                     edgecolor='dimgray',
+                     linewidth=2)
+    
+    for region_count in range(nb_ROI):
+        if measure != 'charac_path' and measure != 'global_efficiency':
+            if p_values_mat[measure][region_count] < 0.001:
+                plt.axvline(x=region_count, linestyle='--', color='red')
+    plt.ylabel(measures_networks[i])
+    plt.xlabel('Regions of Interest (80 ROIs)')
+    plt.title(measures_networks[i], fontweight='bold', loc='center', fontsize=16)
+    plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+    plt.legend()
+    plt.savefig('graph_pictures/mann-whitney/' + measures_networks[i] + '.png', dpi=400)
+    plt.show()
+    
+    fig = plt.figure(figsize=(6, 2.75))
+    
+    matrix_map, atlas_threshold = apply_threshold(p_values_mat[measure], atlas_region_coords)
+    disp = plotting.plot_connectome(matrix_map, 
+                                    atlas_threshold,
+                                    figure=fig)
+
+    disp.savefig('graph_pictures/mann-whitney/' + measures_networks[i] + '_brain', dpi=400)
+    plotting.show()
+    i+=1
+        
 #%%
 '''
 #%% Mean and std measures of each region
