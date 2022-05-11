@@ -6,11 +6,13 @@ import sys
 import networkx as nx
 import statsmodels.api as sm 
 from statsmodels.stats.multitest import multipletests
+import bct
 
 import numpy as np
 import scipy as sp
 import pandas as pd
 from matplotlib import pyplot as plt
+import matplotlib as mpl
 import seaborn as sns
 from nilearn import plotting
 from tqdm import tqdm 
@@ -186,6 +188,62 @@ def glm_models(data_):
     """
     glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
     return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
+
+# Switcher class for multiple algorithms
+# https://www.davidsbatista.net/blog/2018/02/23/model_optimization/
+from sklearn.model_selection import GridSearchCV
+
+class EstimatorSelectionHelper:
+
+    def __init__(self, models, params):
+        if not set(models.keys()).issubset(set(params.keys())):
+            missing_params = list(set(models.keys()) - set(params.keys()))
+            raise ValueError("Some estimators are missing parameters: %s" % missing_params)
+        self.models = models
+        self.params = params
+        self.keys = models.keys()
+        self.grid_searches = {}
+
+    def fit(self, X, y, cv=10, n_jobs=6, verbose=1, scoring=None, refit=False):
+        for key in self.keys:
+            print("Running GridSearchCV for %s." % key)
+            model = self.models[key]
+            params = self.params[key]
+            gs = GridSearchCV(model, params, cv=cv, n_jobs=n_jobs,
+                              verbose=verbose, scoring=scoring, refit=refit,
+                              return_train_score=True)
+            gs.fit(X,y)
+            self.grid_searches[key] = gs    
+
+    def score_summary(self, sort_by='mean_score'):
+        def row(key, scores, params):
+            d = {
+                 'estimator': key,
+                 'mean_score': np.mean(scores),
+                 'std_score': np.std(scores),
+            }
+            return pd.Series({**params,**d})
+
+        rows = []
+        for k in self.grid_searches:
+            print(k)
+            params = self.grid_searches[k].cv_results_['params']
+            scores = []
+            for i in range(self.grid_searches[k].cv):
+                key = "split{}_test_score".format(i)
+                r = self.grid_searches[k].cv_results_[key]        
+                scores.append(r.reshape(len(params),1))
+
+            all_scores = np.hstack(scores)
+            for p, s in zip(params,all_scores):
+                rows.append((row(k, s, p)))
+
+        df = pd.concat(rows, axis=1).T.sort_values([sort_by], ascending=False)
+
+        columns = ['estimator', 'mean_score', 'std_score']
+        columns = columns + [c for c in df.columns if c not in columns]
+
+        return df[columns]
     
 #%% Conversion from fiber numbers to density and apply connection threshold
 #for patient in connectivity_matrices.keys():
@@ -258,7 +316,7 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('Ttest par connexion, p < 0.001')
+plt.title('t-test par connexion, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
 
@@ -286,6 +344,26 @@ plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 #plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
 plt.show()
+
+#%% Retrieve direction of significance in significant ROIs
+'''
+significant_ROIs = np.argwhere(p_value_connection_bounded_inverse != 0)
+# Remove duplicate rows and pairs
+dupli_rows = []
+for i in range(significant_ROIs.shape[0]):
+    if significant_ROIs[i, 0] == significant_ROIs[i, 1]:
+        dupli_rows.append(i)
+    for j in range(i, significant_ROIs.shape[0]):
+        if i!=j and j not in dupli_rows and significant_ROIs[i, 0] == significant_ROIs[j, 1] and significant_ROIs[i, 1] == significant_ROIs[j, 0]:
+            dupli_rows.append(j)
+            
+significant_ROIs = np.delete(significant_ROIs, dupli_rows, 0)
+
+mean_connections_patients = np.mean(connections_patients, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+std_connections_patients = np.std(connections_patients, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+mean_connections_controls = np.mean(connections_controls, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+std_connections_controls = np.std(connections_controls, axis=2)[significant_ROIs[:, 0], significant_ROIs[:, 1]]
+'''
 
 #%% FDR
 p_value_connection_upper = np.zeros((nb_ROI, nb_ROI))
@@ -400,9 +478,32 @@ plt.show()
 
 #print('levene statistics :', ftest_stat)
 #print('levene pvalue :', ftest_pvalue)
+
+#%% Test of normality 
+xymat = np.concatenate((xmat, ymat), axis=1)
+# perform t-test at each edge
+shapiro_pvalue = np.zeros((m,))
+for i in range(m):
+    shapiro_pvalue[i] = sp.stats.shapiro(xymat[i, :])[1]
+    
+ind = np.triu_indices(nb_ROI, k=1)
+shapiro_mat = np.zeros((nb_ROI, nb_ROI))
+shapiro_mat[ind]=shapiro_pvalue
+shapiro_mat = shapiro_mat + shapiro_mat.T
+
+np.fill_diagonal(shapiro_mat, 0)
+p_value_connection_bounded = copy.deepcopy(shapiro_mat)
+p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
+# dirty
+p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
+plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
+plt.xlabel('ROIs')
+plt.ylabel('ROIs')
+plt.title('Shapiro test par connexion, p < 0.001')
+#plt.savefig('graph_pictures/ttest_connections_Bonferroni.png', dpi=600)
+plt.show()
+
 #%% NBS
-import matplotlib as mpl
-import bct
 
 # proportional threshold, 10 values
 threshold_grid = [0.05, 0.01, 0.001, 0.0005, 0.0002, 0.0001] # for mannwhitneyu test
@@ -415,71 +516,20 @@ pval_grid, adj_grid = [], []
 
 for thresh_grid in threshold_grid:
     print(len(adj_grid))
-    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :patients_count], y=fitted_linear_connections_subjects[:, :, patients_count:], thresh=thresh_grid, method='mannwhitneyu', k=1000)
+    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :patients_count], y=fitted_linear_connections_subjects[:, :, patients_count:], thresh=thresh_grid, method='mannwhitneyu', k=100)
     pval_grid.append(pval)
     adj_grid.append(adj)
 
 #%%
 for i in range(len(adj_grid)):
     plt.imshow(adj_grid[i])
+    plt.xticks(np.arange(0, 81, 10))
+    plt.yticks(np.arange(0, 81, 10))
+    plt.xlabel('ROIs')
+    plt.ylabel('ROIs')
     plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[i]))
+    plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[i]) + 'wc.png', dpi=600)
     plt.show()
-
-#%% Switcher class for multiple algorithms
-# https://www.davidsbatista.net/blog/2018/02/23/model_optimization/
-from sklearn.model_selection import GridSearchCV
-
-class EstimatorSelectionHelper:
-
-    def __init__(self, models, params):
-        if not set(models.keys()).issubset(set(params.keys())):
-            missing_params = list(set(models.keys()) - set(params.keys()))
-            raise ValueError("Some estimators are missing parameters: %s" % missing_params)
-        self.models = models
-        self.params = params
-        self.keys = models.keys()
-        self.grid_searches = {}
-
-    def fit(self, X, y, cv=10, n_jobs=6, verbose=1, scoring=None, refit=False):
-        for key in self.keys:
-            print("Running GridSearchCV for %s." % key)
-            model = self.models[key]
-            params = self.params[key]
-            gs = GridSearchCV(model, params, cv=cv, n_jobs=n_jobs,
-                              verbose=verbose, scoring=scoring, refit=refit,
-                              return_train_score=True)
-            gs.fit(X,y)
-            self.grid_searches[key] = gs    
-
-    def score_summary(self, sort_by='mean_score'):
-        def row(key, scores, params):
-            d = {
-                 'estimator': key,
-                 'mean_score': np.mean(scores),
-                 'std_score': np.std(scores),
-            }
-            return pd.Series({**params,**d})
-
-        rows = []
-        for k in self.grid_searches:
-            print(k)
-            params = self.grid_searches[k].cv_results_['params']
-            scores = []
-            for i in range(self.grid_searches[k].cv):
-                key = "split{}_test_score".format(i)
-                r = self.grid_searches[k].cv_results_[key]        
-                scores.append(r.reshape(len(params),1))
-
-            all_scores = np.hstack(scores)
-            for p, s in zip(params,all_scores):
-                rows.append((row(k, s, p)))
-
-        df = pd.concat(rows, axis=1).T.sort_values([sort_by], ascending=False)
-
-        columns = ['estimator', 'mean_score', 'std_score']
-        columns = columns + [c for c in df.columns if c not in columns]
-
-        return df[columns]
 
 #%% Multiple algorithms pipeline
 from sklearn.naive_bayes import GaussianNB
@@ -626,18 +676,18 @@ plt.title('Threshold effect for f1')
 # plt.savefig('graph_pictures/NBS_threshold_with_errorbars.png', dpi=600)
 plt.show()
 
-OPTIMAL_THRESHOLD_COUNT = 4
+OPTIMAL_THRESHOLD_COUNT = 5
 #%%
 fig, ax = plt.subplots()
 cmap = mpl.cm.get_cmap('Accent', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
 im = plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap=cmap, vmin=0, vmax=len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])), aspect=1, interpolation="none")
-fig.colorbar(im, ticks=range(len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT]))), orientation="horizontal", fraction=0.05, pad=0.18)
+fig.colorbar(im, ticks=range(len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT]))), orientation="vertical", fraction=0.05, pad=0.04)
 plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('NBS, threshold={:,.2f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-#plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=600)
+plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
+# plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=600)
 plt.show()
 
 threshold_adj = copy.deepcopy(adj_grid[OPTIMAL_THRESHOLD_COUNT])
@@ -669,7 +719,7 @@ disp = plotting.plot_connectome(adj_grid[OPTIMAL_THRESHOLD_COUNT],
                                 edge_cmap='Accent',
                                 figure=fig)
 
-#disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
+# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
 plotting.show()
 
 #%% Heatmap modified
@@ -726,7 +776,6 @@ for i in range(nx):
     xmat[:, i] = x[:, :, i][ixes].squeeze()
 for i in range(ny):
     ymat[:, i] = y[:, :, i][ixes].squeeze()
-del x, y
 
 # perform t-test at each edge
 t_stat = np.zeros((m,))
@@ -862,62 +911,3 @@ for train_index, test_index in cv.split(X, y):
     fpr, tpr, threshold_roc = roc_curve(y_test, y_pred, pos_label=1)
     auc_grid[thresh].append(auc(fpr, tpr))
     f1_score_grid[thresh].append(f1_score(y_test, y_pred))
-
-#%%
-# calculate the g-mean for each threshold
-gmeans = np.sqrt(tpr * (1-fpr))
-# locate the index of the largest g-mean
-ix = np.argmax(gmeans)
-print('Best Threshold=%f, G-Mean=%.3f' % (threshold_roc[ix], gmeans[ix]))
-# plot the roc curve for the model
-plt.plot([0,1], [0,1], linestyle='--')
-plt.plot(fpr, tpr, marker='.')
-plt.scatter(fpr[ix], tpr[ix], marker='o', color='black', label='Best')
-# axis labels
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.legend()
-# show the plot
-plt.show()
-
-#%% Mann-Whitney U
-x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
-y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
-
-#%% scipy 
-p_value_connection = np.zeros((nb_ROI, nb_ROI))
-U1 = np.zeros((nb_ROI, nb_ROI))
-for i in tqdm(range(nb_ROI)):
-    for j in range(i+1, nb_ROI): 
-        U1[i,j], p_value_connection[i][j] = sp.stats.mannwhitneyu(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count])
-
-# copy upper triangle to lower to obtain symmetric matrix
-p_value_connection = p_value_connection + p_value_connection.T - np.diag(np.diag(p_value_connection))
-U1 = U1 + U1.T - np.diag(np.diag(U1))
-
-p_value_connection_bounded = copy.deepcopy(p_value_connection)
-p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
-np.fill_diagonal(p_value_connection_bounded, 1)
-# dirty
-p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
-plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
-plt.xlabel('ROIs')
-plt.ylabel('ROIs')
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
-plt.title('t-test par connexion, p < 0.001')
-#plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
-plt.show()
-
-#%% 
-thresh = 0.001
-u_stat, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
-ind_t = np.argwhere(u_pvalue < thresh)
-
-# Compute adjacency matrix
-adj = np.zeros((n, n), dtype=int)      
-for a, b in ind_t:
-    adj[a, b] = 1
-    adj[b, a] = 1
-        
-plt.imshow(adj)
