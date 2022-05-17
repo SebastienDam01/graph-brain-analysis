@@ -270,7 +270,7 @@ def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
     p = mat_obs.shape[0]
     mat_permut = np.zeros((p, ntest))
-    
+        
     # 1. randomize samples
     for t in range(ntest):
         subset_size = len(list_A)
@@ -869,15 +869,15 @@ local_metrics = ['clust_coef',
                  'deg',
                  'between_cen',
                  'parti_coef',
-                 'net_resilience', # nan values
+                 # 'net_resilience', # nan values
                  'curvature',
                  'strength']
 
 global_metrics = ['charac_path',
                   'global_efficiency',
                   'global_clust_coef',
-                  'global_strength',
-                  'small_worldness']
+                  'global_strength']
+                  #'small_worldness']
 
 metrics_patients = dict((k, []) for k in local_metrics + global_metrics)
 metrics_controls = dict((k, []) for k in local_metrics + global_metrics)
@@ -897,10 +897,10 @@ for patient in patients:
     between_cen = betweenness_centrality(G)
     ci, _ = modularity_louvain_und(G)
     parti_coef = participation_coef(G, ci)
-    net_resilience = average_neighbor_degree(G)
+    #net_resilience = average_neighbor_degree(G)
     curvature = node_curvature(G)
     strength = bct.strengths_und(G)
-    small_worldness = nx.sigma(get_network(G))
+    #small_worldness = nx.sigma(get_network(G))
     
     metrics_patients['clust_coef'].append(clust_coef)
     metrics_patients['local_efficiency'].append(local_efficiency)
@@ -909,12 +909,12 @@ for patient in patients:
     metrics_patients['deg'].append(deg)
     metrics_patients['between_cen'].append(between_cen)
     metrics_patients['parti_coef'].append(parti_coef)
-    metrics_patients['net_resilience'].append(net_resilience)
+    #metrics_patients['net_resilience'].append(net_resilience)
     metrics_patients['curvature'].append(curvature)
     metrics_patients['global_clust_coef'].append(np.mean(clust_coef))
     metrics_patients['strength'].append(strength)
     metrics_patients['global_strength'].append(np.mean(strength))
-    metrics_patients['small_worldness'].append(small_worldness)
+    #metrics_patients['small_worldness'].append(small_worldness)
     
     patient_idx += 1
     printProgressBar(patient_idx, patients_count, prefix = 'Patients progress:', suffix = 'Complete', length = 50)
@@ -932,10 +932,10 @@ for control in controls:
     between_cen = betweenness_centrality(G)
     ci, _ = modularity_louvain_und(G)
     parti_coef = participation_coef(G, ci)
-    net_resilience = average_neighbor_degree(G)
+    #net_resilience = average_neighbor_degree(G)
     curvature = node_curvature(G)
     strength = bct.strengths_und(G)
-    small_worldness = nx.sigma(get_network(G))
+    #small_worldness = nx.sigma(get_network(G))
     
     metrics_controls['clust_coef'].append(clust_coef)
     metrics_controls['local_efficiency'].append(local_efficiency)
@@ -944,12 +944,12 @@ for control in controls:
     metrics_controls['deg'].append(deg)
     metrics_controls['between_cen'].append(between_cen)
     metrics_controls['parti_coef'].append(parti_coef)
-    metrics_controls['net_resilience'].append(net_resilience)
+    # metrics_controls['net_resilience'].append(net_resilience)
     metrics_controls['curvature'].append(curvature)
     metrics_controls['global_clust_coef'].append(np.mean(clust_coef))
     metrics_controls['strength'].append(strength)
     metrics_controls['global_strength'].append(np.mean(strength))
-    metrics_controls['small_worldness'].append(small_worldness)
+    #metrics_controls['small_worldness'].append(small_worldness)
 
     control_idx += 1
     printProgressBar(control_idx, controls_count, prefix = 'Controls progress:', suffix = 'Complete', length = 50)
@@ -998,7 +998,7 @@ for metric in local_metrics:
     measures_subjects[metric] = np.vstack((measures_patients[metric], measures_controls[metric]))
 for metric in global_metrics:
     measures_subjects[metric] = np.hstack((metrics_patients[metric], metrics_controls[metric]))
-    
+
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
@@ -1006,12 +1006,13 @@ data = pd.DataFrame({
     "Metric": np.zeros(subject_count)
     })
 
-measures_subjects = {}
 for metric in global_metrics:
     data["Metric"] = measures_subjects[metric]
     measures_subjects[metric] = glm_models(data)
+
 for metric in local_metrics:
-    measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
+    print(metric)
+    # measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
     for region in tqdm(range(nb_ROI)):
         data["Metric"] = measures_subjects[metric][:, region]
         measures_subjects[metric][:, region] = glm_models(data)
@@ -1048,10 +1049,10 @@ for measure in local_metrics:
     for region_count in range(nb_ROI):
         _, p_value_region[measure][region_count] = sp.stats.mannwhitneyu(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count])
 
-stat, p_value_region['charac_path'] = sp.stats.ttest_ind(metrics_patients['charac_path'], metrics_controls['charac_path'], permutations=5000, equal_var=False)
-stat, p_value_region['global_efficiency'] = sp.stats.ttest_ind(metrics_patients['global_efficiency'], metrics_controls['global_efficiency'], permutations=5000, equal_var=False)
-_, p_value_region['global_clust_coef'] = sp.stats.ttest_ind(metrics_patients['global_clust_coef'], metrics_controls['global_clust_coef'], permutations=5000, equal_var=False)
-_, p_value_region['global_strength'] = sp.stats.ttest_ind(metrics_patients['global_strength'], metrics_controls['global_strength'], permutations=5000, equal_var=False)
+_, p_value_region['charac_path'] = sp.stats.ttest_ind(measures_subjects['charac_path'][:patients_count], measures_subjects['charac_path'][patients_count:], permutations=5000, equal_var=False)
+_, p_value_region['global_efficiency'] = sp.stats.ttest_ind(measures_subjects['global_efficiency'][:patients_count], measures_subjects['global_efficiency'][patients_count:], permutations=5000, equal_var=False)
+_, p_value_region['global_clust_coef'] = sp.stats.ttest_ind(measures_subjects['global_clust_coef'][:patients_count], measures_subjects['global_clust_coef'][patients_count:], permutations=5000, equal_var=False)
+_, p_value_region['global_strength'] = sp.stats.ttest_ind(measures_subjects['global_strength'][:patients_count], measures_subjects['global_strength'][patients_count:], permutations=5000, equal_var=False)
 
 for measure in p_value_region.keys():
     if measure in local_metrics:
@@ -1110,13 +1111,14 @@ for measure in mean_measures_controls.keys():
                                     atlas_threshold,
                                     figure=fig)
 
-    disp.savefig('graph_pictures/' + measures_networks[i] + '_brain', dpi=400)
+    # disp.savefig('graph_pictures/' + measures_networks[i] + '_brain', dpi=400)
     plotting.show()
     i+=1
 
 #%% Mann-Whitney U test
 stats_measures = {}
 p_values_mat = {}
+
 for measure in local_metrics:
     print(measure)
     stats_measures[measure] = np.zeros((nb_ROI,))
@@ -1132,6 +1134,20 @@ for measure in local_metrics:
                                     stats_measures[measure],
                                     measure,
                                     5000)
+    
+# for measure in global_metrics:
+#     subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
+#     subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
+    
+#     stats_measures[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
+    
+#%%
+
+p_values_mat[measure] = permutation_test(subset_controls,
+                                subset_patients,
+                                stats_measures[measure],
+                                measure,
+                                5000)
     
 #%% Plot values and significant differences - Local measures
 i=0
@@ -1164,7 +1180,7 @@ for measure in mean_measures_controls.keys():
     plt.title(measures_networks[i], fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
-    #plt.savefig('graph_pictures/mann-whitney/' + measures_networks[i] + '.png', dpi=400)
+    # plt.savefig('graph_pictures/mann-whitney/svg/' + measures_networks[i] + '.svg')
     plt.show()
     
     fig = plt.figure(figsize=(6, 2.75))
@@ -1174,7 +1190,7 @@ for measure in mean_measures_controls.keys():
                                     atlas_threshold,
                                     figure=fig)
 
-    #disp.savefig('graph_pictures/mann-whitney/' + measures_networks[i] + '_brain', dpi=400)
+    # disp.savefig('graph_pictures/mann-whitney/svg/' + measures_networks[i] + '_brain.svg')
     plotting.show()
     i+=1
     

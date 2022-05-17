@@ -528,7 +528,7 @@ for i in range(len(adj_grid)):
     plt.xlabel('ROIs')
     plt.ylabel('ROIs')
     plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[i]))
-    plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[i]) + 'wc.png', dpi=600)
+    # plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[i]) + 'wc.png', dpi=600)
     plt.show()
 
 #%% Multiple algorithms pipeline
@@ -676,7 +676,7 @@ plt.title('Threshold effect for f1')
 # plt.savefig('graph_pictures/NBS_threshold_with_errorbars.png', dpi=600)
 plt.show()
 
-OPTIMAL_THRESHOLD_COUNT = 5
+OPTIMAL_THRESHOLD_COUNT = 4
 #%%
 fig, ax = plt.subplots()
 cmap = mpl.cm.get_cmap('Accent', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
@@ -687,7 +687,7 @@ plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-# plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=600)
+plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=600)
 plt.show()
 
 threshold_adj = copy.deepcopy(adj_grid[OPTIMAL_THRESHOLD_COUNT])
@@ -719,7 +719,7 @@ disp = plotting.plot_connectome(adj_grid[OPTIMAL_THRESHOLD_COUNT],
                                 edge_cmap='Accent',
                                 figure=fig)
 
-# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
+disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
 plotting.show()
 
 #%% Heatmap modified
@@ -911,3 +911,130 @@ for train_index, test_index in cv.split(X, y):
     fpr, tpr, threshold_roc = roc_curve(y_test, y_pred, pos_label=1)
     auc_grid[thresh].append(auc(fpr, tpr))
     f1_score_grid[thresh].append(f1_score(y_test, y_pred))
+
+#%% DDT 
+x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
+y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
+n = len(x)
+
+# 1. Difference network 
+_, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
+D = 1 - u_pvalue
+np.fill_diagonal(D, 0)
+#%% 
+# 2. First and second moments
+U = 2 # arg
+D_bar = sp.special.logit(D)
+# D_bar[np.diag_indices(n)[0], np.diag_indices(n)[1]] = np.diag(D) # to verify
+
+## Convert -inf and +inf to random values
+idxinf = np.argwhere(D_bar <= -12)
+idxsup = np.argwhere(D_bar >= 12)
+neg = -12 + (-13 + 12) * np.random.rand(1)
+pos = 12 + (13 - 12) * np.random.rand(1)
+D_bar[idxinf[:, 0], idxinf[:, 1]] = neg
+D_bar[idxsup[:, 0], idxsup[:, 1]] = pos
+
+e_bar = np.mean(D_bar[np.triu_indices(n, 1)]) # mean of off-diagonal elements
+v_bar = np.var(D_bar[np.triu_indices(n, 1)]) # variance of off-diagonal elements
+e = np.mean(np.diag(D_bar))
+m = max(2, np.floor((e_bar ** 2 - e ** 2) / v_bar)) # if min (like in paper), returns negative value
+μ = np.sqrt(e_bar/m)
+σsq = -(μ ** 2) + np.sqrt(μ ** 4 + (v_bar / m))
+
+# 3. Generate U null Difference Networks
+C = np.zeros((n, n, U))
+null = np.zeros((n, n ,U))
+
+for i in range(U):
+    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+    C[:, :, i] = l @ l.T
+    null[:, :, i] = sp.special.expit(C[:, :, i])
+    
+for i in range(U):
+    print("mean of off-diagonal elements: {}, expected value: {}".format(np.mean(C[:, :, i][np.triu_indices(n, 1)]), e_bar))
+    print("variance of off-diagonal elements: {}, expected value: {}".format(np.var(C[:, :, i][np.triu_indices(n, 1)]), v_bar))
+    print("mean of diagonal elements: {}, expected value: {} \n".format(np.mean(np.diag(C[:, :, i])), e))
+
+# 4. Adaptive threshold  
+
+## 4.1 aDDT
+df = m
+ncp = m * (4 * (μ ** 2)) / (2 * σsq) # non-centrality parameter
+mcon = 2 * σsq / 4 # constant
+H = mcon * sp.stats.ncx2.rvs(df, ncp, size=1000000) - mcon * sp.stats.chi2.rvs(df, size=1000000)
+
+ll = np.quantile(H, .975)
+thresh_aDDT = sp.special.expit(ll)
+
+## 4.2 eDDT
+quant = np.zeros((U, ))
+for i in range(U):
+    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+    C[:, :, i] = l @ l.T
+    null[:, :, i] = sp.special.expit(C[:, :, i])
+    quant[i] = np.percentile(C[:, :, i][np.triu_indices(n, 1)], 97.5)
+    
+thresh_eDDT = np.exp(np.max(quant)) / (1 + np.exp(np.max(quant)))
+
+# 5. Apply threshold 
+γ = sp.special.logit(thresh_aDDT)
+A = np.where(D_bar > γ, 1, 0)
+d_obs = A @ np.ones(n)
+
+# 6. Generate null distribution for di
+sum_A_thresh = np.zeros((n, ))
+for u in range(U):
+    A_null_thresh = np.where(null[:, :, u] > thresh_aDDT, 1, 0)
+    sum_A_thresh = sum_A_thresh + A_null_thresh @ np.ones(n)
+p_null = (1 / (U * (n - 1))) * sum_A_thresh
+
+d_null = np.random.binomial(n-1, p_null)
+
+# 7. Assess the statistical significance of the number of DWE at each node
+result = np.where(d_obs > d_null, 1, 0)
+
+#%% Plot
+d_obs[result == 0] = 0
+fig = plt.figure(figsize=(6, 2.75))
+
+atlas_threshold = apply_threshold(A, atlas_region_coords)
+disp = plotting.plot_connectome(A, 
+                                atlas_threshold,
+                                node_size=d_obs,
+                                figure=fig)
+
+# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
+plotting.show()
+
+#%% Binomial probability density function under the null
+p_obs=sp.stats.binom.pmf(d_obs, n-1, p_null)
+# Select regions where the DWE is statistically significant
+p_obs[result == 0] = 1
+# p values that are greater or equal than 0.05 are discarded
+pvalue_DDT = copy.deepcopy(p_obs)
+pvalue_DDT[pvalue_DDT >= 0.05] = 1
+# Discard regions where the corresponding pvalue is greater or equal than 0.05
+d_obs_pvalued = copy.deepcopy(d_obs)
+d_obs_pvalued[pvalue_DDT == 1] = 0
+# Discard regions incident to less than 3 DWE
+d_obs_pvalued[d_obs_pvalued < 3] = 0
+
+# FIXME : Remove edges accordingly in adjacency matrix
+A_pvalued = copy.deepcopy(A)
+for i in range(n):
+    if d_obs_pvalued[i] == 0:
+        A_pvalued[i, :] = np.zeros(n)
+        # A_pvalued[:, i] = A_pvalued[i, :]
+        
+
+# fig = plt.figure(figsize=(6, 2.75))
+
+# atlas_threshold = apply_threshold(A, atlas_region_coords)
+# disp = plotting.plot_connectome(A, 
+#                                 atlas_threshold,
+#                                 node_size=d_obs_pvalued,
+#                                 figure=fig)
+
+# # disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
+# plotting.show()
