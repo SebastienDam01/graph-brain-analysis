@@ -7,6 +7,7 @@ import csv
 
 # Scientific modules
 import numpy as np
+import pandas as pd
 
 from scipy.io import loadmat
 
@@ -149,15 +150,34 @@ for key, mat in connectivity_matrices.items():
             
 print("Empty matrices:", null_matrices)
 print("Diagonal matrices:", diag_matrices)
-    
+
+#%% responders vs non-responders
+response_df = pd.read_csv('../data/Table_data.csv')
+ 
+old_ID = list(response_df['ID'])
+new_ID = []
+for ID in response_df['ID']:
+    for patient in patients:
+        if ID[-5:] == patient[-5:]:
+            new_ID.append(patient)   
+
+response_df = response_df.replace(old_ID, new_ID)
+
+responders = list(response_df.loc[response_df['rep'].isin([1])]['ID'])
+non_responders = list(response_df.loc[response_df['rep'].isin([0])]['ID'])
+
+print("Classified {} responders and {} non-responders".format(len(responders), len(non_responders)))
+
 #%% Dump data
 
 with open('../manage_data/data_preprocessed.pickle', 'wb') as f:
     pickle.dump(
         [connectivity_matrices,
-         controls,
-         patients,
-         controls_count,
-         patients_count,
-         subject_count,
-         patient_info_dict], f)
+          controls,
+          patients,
+          controls_count,
+          patients_count,
+          subject_count,
+          patient_info_dict,
+          responders, 
+          non_responders], f)
