@@ -1122,13 +1122,12 @@ n_permut = 50000
 print('Computing Mann-Whitney U test ...')
 for measure in local_metrics:
     print(measure)
-    stats_measures[measure] = np.zeros((nb_ROI,))
+    # stats_measures[measure] = np.zeros((nb_ROI,))
     p_values_mat[measure] = np.zeros((nb_ROI,))
     subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # shuffle index, actually not needed
     subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # shuffle index, actually not needed
     
-    for region_count in range(nb_ROI):
-        stats_measures[measure][region_count], _ = sp.stats.mannwhitneyu(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count])
+    stats_measures[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
     
     p_values_mat[measure] = permutation_test(subset_controls,
                                     subset_patients,
