@@ -26,7 +26,12 @@ def plot_connectivity_matrix(*matrix, subject_name=None, save=None):
     
     for i, mat in enumerate(matrix):
         plt.subplot(line, max_rows, i+1)
+        plt.grid(False)
         plt.imshow(np.log(mat+1),cmap='viridis')
+        plt.xticks(np.arange(0, 81, 10))
+        plt.yticks(np.arange(0, 81, 10))
+        plt.xlabel('ROIs')
+        plt.ylabel('ROIs')
         plt.title(subject_name)
     
     plt.tight_layout()

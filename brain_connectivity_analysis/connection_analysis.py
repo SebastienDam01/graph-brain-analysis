@@ -25,7 +25,7 @@ THRESHOLD = 0.3
 
 # Load variables from data_preprocessed.pickle
 with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict = pickle.load(f)
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
@@ -69,7 +69,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 0] + volumes[subject][j, 0])
+                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
 
@@ -269,6 +269,7 @@ for patient_idx in range(patients_count):
 dict_keys = list(patient_info_dict.keys())
 for subject in dict_keys:
     if subject not in patients + controls or subject in subjects_to_delete or patient_info_dict[subject]['Age']=='':
+        print(subject)
         del patient_info_dict[subject]
         
 age_patients = [int(i) for i in [patient_info_dict[key]['Age'] for key in patient_info_dict.keys() if key in patients]]
@@ -288,7 +289,7 @@ data = pd.DataFrame({
     "Gender": gender,
     "Metric": np.zeros(subject_count)
     })
-
+#%%
 fitted_linear_connections_subjects = np.zeros((nb_ROI, nb_ROI, subject_count))
 for i in tqdm(range(nb_ROI)):
     for j in range(nb_ROI):
@@ -342,6 +343,7 @@ plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
+plt.title('Heatmap with density of fibers')
 #plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
 plt.show()
 
@@ -678,19 +680,33 @@ plt.show()
 
 OPTIMAL_THRESHOLD_COUNT = 4
 #%%
+nbs_network = adj_grid[OPTIMAL_THRESHOLD_COUNT]
+# Remove subnetworks where number of nodes is two 
+for i in np.unique(nbs_network):
+    if np.count_nonzero((nbs_network) == i) == 2:
+        nbs_network[nbs_network == i] = 0
+
+# set values starting from 0 and increment by 1 
+# in order to have the corresponding colors in cmap
+
+j = 0
+for i in np.unique(nbs_network):
+    nbs_network[nbs_network == i] = j
+    j+=1
+
 fig, ax = plt.subplots()
-cmap = mpl.cm.get_cmap('Accent', len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])))
-im = plt.imshow(adj_grid[OPTIMAL_THRESHOLD_COUNT], cmap=cmap, vmin=0, vmax=len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT])), aspect=1, interpolation="none")
-fig.colorbar(im, ticks=range(len(np.unique(adj_grid[OPTIMAL_THRESHOLD_COUNT]))), orientation="vertical", fraction=0.05, pad=0.04)
+cmap = mpl.cm.get_cmap('Accent', len(np.unique(nbs_network)))
+im = plt.imshow(nbs_network, cmap=cmap, vmin=0, vmax=len(np.unique(nbs_network)), aspect=1, interpolation="none")
+fig.colorbar(im, ticks=range(len(np.unique(nbs_network))), orientation="vertical", fraction=0.05, pad=0.04)
 plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=600)
+# plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.pdf')
 plt.show()
 
-threshold_adj = copy.deepcopy(adj_grid[OPTIMAL_THRESHOLD_COUNT])
+threshold_adj = copy.deepcopy(nbs_network)
 threshold_adj[threshold_adj != 0] = 1 
 degree = threshold_adj @ np.ones(80)
 node_size = degree * 50
@@ -712,14 +728,15 @@ node_size = degree * 50
 
 fig = plt.figure(figsize=(6, 2.75))
 
-atlas_threshold = apply_threshold(adj_grid[OPTIMAL_THRESHOLD_COUNT], atlas_region_coords)
-disp = plotting.plot_connectome(adj_grid[OPTIMAL_THRESHOLD_COUNT], 
+atlas_threshold = apply_threshold(nbs_network, atlas_region_coords)
+disp = plotting.plot_connectome(nbs_network, 
                                 atlas_threshold,
                                 node_size=node_size,
-                                edge_cmap='Accent',
+                                edge_threshold=2,
+                                edge_cmap=mpl.colors.ListedColormap(['royalblue', 'dimgray', 'royalblue', 'dimgray', 'royalblue', 'dimgray']),
                                 figure=fig)
 
-disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
+# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.pdf')
 plotting.show()
 
 #%% Heatmap modified
@@ -832,7 +849,7 @@ plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-#plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
+# plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
 plt.show()
 
 #%% Threshold selection by classification 
@@ -920,7 +937,7 @@ n = len(x)
 # 1. Difference network 
 _, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
 D = 1 - u_pvalue
-np.fill_diagonal(D, 0)
+# np.fill_diagonal(D, 0)
 #%% 
 # 2. First and second moments
 U = 2 # arg
@@ -930,8 +947,8 @@ D_bar = sp.special.logit(D)
 ## Convert -inf and +inf to random values
 idxinf = np.argwhere(D_bar <= -12)
 idxsup = np.argwhere(D_bar >= 12)
-neg = -12 + (-13 + 12) * np.random.rand(1)
-pos = 12 + (13 - 12) * np.random.rand(1)
+neg = -12 - 1 * np.random.rand(1)
+pos = 12 + 1 * np.random.rand(1)
 D_bar[idxinf[:, 0], idxinf[:, 1]] = neg
 D_bar[idxsup[:, 0], idxsup[:, 1]] = pos
 
@@ -968,14 +985,14 @@ ll = np.quantile(H, .975)
 thresh_aDDT = sp.special.expit(ll)
 
 ## 4.2 eDDT
-quant = np.zeros((U, ))
-for i in range(U):
-    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
-    C[:, :, i] = l @ l.T
-    null[:, :, i] = sp.special.expit(C[:, :, i])
-    quant[i] = np.percentile(C[:, :, i][np.triu_indices(n, 1)], 97.5)
+# quant = np.zeros((U, ))
+# for i in range(U):
+#     l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+#     C[:, :, i] = l @ l.T
+#     null[:, :, i] = sp.special.expit(C[:, :, i])
+#     quant[i] = np.percentile(C[:, :, i][np.triu_indices(n, 1)], 97.5)
     
-thresh_eDDT = np.exp(np.max(quant)) / (1 + np.exp(np.max(quant)))
+# thresh_eDDT = np.exp(np.max(quant)) / (1 + np.exp(np.max(quant)))
 
 # 5. Apply threshold 
 γ = sp.special.logit(thresh_aDDT)
@@ -985,7 +1002,7 @@ d_obs = A @ np.ones(n)
 # 6. Generate null distribution for di
 sum_A_thresh = np.zeros((n, ))
 for u in range(U):
-    A_null_thresh = np.where(null[:, :, u] > thresh_aDDT, 1, 0)
+    A_null_thresh = np.where(null[:, :, u] >= thresh_aDDT, 1, 0)
     sum_A_thresh = sum_A_thresh + A_null_thresh @ np.ones(n)
 p_null = (1 / (U * (n - 1))) * sum_A_thresh
 

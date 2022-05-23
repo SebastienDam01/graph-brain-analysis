@@ -26,7 +26,7 @@ THRESHOLD = 0.3
 
 # Load variables from data_preprocessed.pickle
 with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict = pickle.load(f)
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
@@ -68,7 +68,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 0] + volumes[subject][j, 0])
+                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
 
@@ -1047,7 +1047,7 @@ p_value_region = {}
 for measure in local_metrics:
     p_value_region[measure] = np.zeros((nb_ROI))
     for region_count in range(nb_ROI):
-        _, p_value_region[measure][region_count] = sp.stats.mannwhitneyu(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count])
+        _, p_value_region[measure][region_count] = sp.stats.ttest_ind(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count], equal_var=False)
 
 _, p_value_region['charac_path'] = sp.stats.ttest_ind(measures_subjects['charac_path'][:patients_count], measures_subjects['charac_path'][patients_count:], permutations=5000, equal_var=False)
 _, p_value_region['global_efficiency'] = sp.stats.ttest_ind(measures_subjects['global_efficiency'][:patients_count], measures_subjects['global_efficiency'][patients_count:], permutations=5000, equal_var=False)
@@ -1098,7 +1098,7 @@ for measure in mean_measures_controls.keys():
                 plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
-    plt.title(measures_networks[i], fontweight='bold', loc='center', fontsize=16)
+    plt.title(measures_networks[i] + ' - Welch test' + ' - 0 permutation tests', fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
     # plt.savefig('graph_pictures/' + measures_networks[i] + '.png', dpi=400)
@@ -1118,13 +1118,14 @@ for measure in mean_measures_controls.keys():
 #%% Mann-Whitney U test
 stats_measures = {}
 p_values_mat = {}
-
+n_permut = 50000
+print('Computing Mann-Whitney U test ...')
 for measure in local_metrics:
     print(measure)
     stats_measures[measure] = np.zeros((nb_ROI,))
     p_values_mat[measure] = np.zeros((nb_ROI,))
-    subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
-    subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
+    subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # shuffle index, actually not needed
+    subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # shuffle index, actually not needed
     
     for region_count in range(nb_ROI):
         stats_measures[measure][region_count], _ = sp.stats.mannwhitneyu(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count])
@@ -1133,23 +1134,59 @@ for measure in local_metrics:
                                     subset_patients,
                                     stats_measures[measure],
                                     measure,
-                                    5000)
-    
-# for measure in global_metrics:
-#     subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
-#     subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
-    
-#     stats_measures[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
+                                    n_permut)
     
 #%%
+def permutation_test_global(list_A, list_B, mat_obs, measure, ntest=1000):
+    """
+    Perform permutation tests for global graph measures. 
 
-p_values_mat[measure] = permutation_test(subset_controls,
-                                subset_patients,
-                                stats_measures[measure],
-                                measure,
-                                5000)
+    Parameters
+    ----------
+    list_A : list
+        indices or names of first group.
+    list_B : list
+        indices or names of second group.
+    mat_obs : Nx1 np.ndarray
+        observed matrix.
+    measure : string
+        name of tested measure.
+    ntest : int, optional
+        number of permutations to perform. The default is 1000.
+
+    Returns
+    -------
+    mat_pval : Nx1 np.ndarray
+        matrix of p-values after permutation.
+
+    """
+    mat_permut = np.zeros((ntest))
+        
+    # 1. randomize samples
+    for t in range(ntest):
+        subset_size = len(list_A)
+        concat_subset = list_A + list_B
+        random.shuffle(concat_subset)
+        subset_A, subset_B = concat_subset[:subset_size], concat_subset[subset_size:]
+        
+        mat_permut[t], _ = sp.stats.mannwhitneyu(measures_subjects[measure][subset_A], measures_subjects[measure][subset_B])
+
+    return np.sum(mat_permut >= mat_obs) / ntest
+
+for measure in global_metrics:
+    subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
+    subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
+    
+    stats_measures[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
+
+    p_values_mat[measure] = permutation_test_global(subset_controls,
+                                    subset_patients,
+                                    stats_measures[measure],
+                                    measure,
+                                    5000)
     
 #%% Plot values and significant differences - Local measures
+p_value = 0.05/80
 i=0
 for measure in mean_measures_controls.keys():
     plt.figure(figsize=(18, 5))
@@ -1173,24 +1210,259 @@ for measure in mean_measures_controls.keys():
     
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
-            if p_values_mat[measure][region_count] < 0.001:
+            if p_values_mat[measure][region_count] < p_value:
                 plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
-    plt.title(measures_networks[i], fontweight='bold', loc='center', fontsize=16)
+    plt.title(measures_networks[i] + ' - Mann-Whitney U test - ' + str(n_permut) + ' permutation tests' + ' - p value=' + '0.05/80', fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
-    # plt.savefig('graph_pictures/mann-whitney/svg/' + measures_networks[i] + '.svg')
+    plt.savefig('graph_pictures/mann-whitney/pdf/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
     plt.show()
     
     fig = plt.figure(figsize=(6, 2.75))
     
     matrix_map, atlas_threshold = apply_threshold(p_values_mat[measure], atlas_region_coords)
+    
+    # remove dot at the center
+    atlas_threshold[atlas_threshold==0] = 'nan'
+    
+    # No significative nodes
+    if len(np.unique(matrix_map)) == 1 and len(np.unique(atlas_threshold)) == 1:
+        matrix_map, atlas_threshold = np.zeros((0, 0)), np.zeros((0, 3))
     disp = plotting.plot_connectome(matrix_map, 
                                     atlas_threshold,
                                     figure=fig)
 
-    # disp.savefig('graph_pictures/mann-whitney/svg/' + measures_networks[i] + '_brain.svg')
+    disp.savefig('graph_pictures/mann-whitney/pdf/' + str(n_permut) + '/' + measures_networks[i] + '_brain.pdf')
     plotting.show()
     i+=1
     
+#%% Without permutation tests
+#%% Mann-Whitney U test
+p_values_mat_wo_permut = {}
+print('Computing Mann-Whitney U test ...')
+for measure in local_metrics:
+    p_values_mat_wo_permut[measure] = np.zeros((nb_ROI,))
+    for region_count in range(nb_ROI):
+        _, p_values_mat_wo_permut[measure][region_count] = sp.stats.mannwhitneyu(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count])
+    
+#%% 
+n_permut = 0
+p_value = 0.05/80
+i=0
+for measure in mean_measures_controls.keys():
+    plt.figure(figsize=(18, 5))
+    plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
+    plt.fill_between(np.linspace(0,79,80), 
+                     mean_measures_controls[measure] - std_measures_controls[measure], 
+                     mean_measures_controls[measure] + std_measures_controls[measure],
+                     alpha=0.25,
+                     color='cyan',
+                     edgecolor='steelblue',
+                     linewidth=2)
+    
+    plt.plot(mean_measures_patients[measure], marker='o', color='black', label='patients')
+    plt.fill_between(np.linspace(0,79,80), 
+                     mean_measures_patients[measure] - std_measures_patients[measure], 
+                     mean_measures_patients[measure] + std_measures_patients[measure],
+                     alpha=0.5,
+                     color='darkgray',
+                     edgecolor='dimgray',
+                     linewidth=2)
+    
+    for region_count in range(nb_ROI):
+        if measure != 'charac_path' and measure != 'global_efficiency':
+            if p_values_mat_wo_permut[measure][region_count] < p_value:
+                plt.axvline(x=region_count, linestyle='--', color='red')
+    plt.ylabel(measures_networks[i])
+    plt.xlabel('Regions of Interest (80 ROIs)')
+    plt.title(measures_networks[i] + ' - Mann-Whitney U test - ' + str(n_permut) + ' permutation tests' + ' - p value=' + '0.05/80', fontweight='bold', loc='center', fontsize=16)
+    plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+    plt.legend()
+    # plt.savefig('graph_pictures/mann-whitney/pdf/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
+    plt.show()
+    
+    fig = plt.figure(figsize=(6, 2.75))
+    
+    matrix_map, atlas_threshold = apply_threshold(p_values_mat[measure], atlas_region_coords)
+    # No significative nodes
+    if len(np.unique(matrix_map)) == 1 and len(np.unique(atlas_threshold)) == 1:
+        matrix_map, atlas_threshold = np.zeros((0, 0)), np.zeros((0, 3))
+    disp = plotting.plot_connectome(matrix_map, 
+                                    atlas_threshold,
+                                    figure=fig)
+
+    # disp.savefig('graph_pictures/mann-whitney/pdf/' + str(n_permut) + '/' + measures_networks[i] + '_brain.pdf')
+    plotting.show()
+    i+=1
+    
+#%% All measures
+marked_regions = np.array([1,0,0,0,0,0,0,1,0,0,1,1,0,1,0,0,1,0,0,0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+1,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+1
+])
+
+node_size = np.array([
+4,
+0,
+0,
+0,
+0,
+0,
+0,
+2,
+0,
+0,
+1,
+2,
+0,
+1,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+2,
+0,
+0,
+0,
+4,
+0,
+0,
+2,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+2,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+2,
+0,
+0,
+0,
+0,
+2,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+1,
+0,
+0,
+0,
+0,
+0,
+0,
+2])
+
+node_size = node_size * 25
+
+graph_matrix = np.zeros((nb_ROI, nb_ROI))
+np.fill_diagonal(graph_matrix, marked_regions)
+
+fig = plt.figure(figsize=(6, 2.75))
+
+atlas = copy.deepcopy(atlas_region_coords)
+
+indices_set_to_zero = [i for i in range(len(marked_regions)) if marked_regions[i] == 0]
+atlas[indices_set_to_zero] = 0
+
+disp = plotting.plot_connectome(graph_matrix, 
+                                atlas,
+                                node_size=node_size,
+                                node_color='DarkBlue',
+                                figure=fig)
+
+disp.title('patients vs. controls')
+
+# disp.savefig('graph_pictures/allmeasures_pvsc.pdf')
+plotting.show()
+i+=1
