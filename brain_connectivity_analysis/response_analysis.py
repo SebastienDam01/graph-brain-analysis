@@ -18,11 +18,11 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from nilearn import plotting
 from tqdm import tqdm 
-# sns.set()
+sns.set()
 
 sys.path.append('../utils')
 #sys.path.insert(0, '../utils')
-#from utils import printProgressBar
+from utils import printProgressBar
 
 THRESHOLD = 0.3
 
@@ -1005,6 +1005,7 @@ for measure in p_value_region.keys():
 #%% Plot values and significant differences - Local measures
 atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
 
+p_value = 0.05
 measures_networks = ['Clustering coefficient',
                      'Local efficiency',
                      'Degree',
@@ -1038,7 +1039,7 @@ for measure in mean_measures_non_responders.keys():
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
             # Bonferroni correction
-            if p_value_region[measure][region_count] < 0.05/80:
+            if p_value_region[measure][region_count] < p_value:
                 plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
@@ -1050,7 +1051,7 @@ for measure in mean_measures_non_responders.keys():
     
     fig = plt.figure(figsize=(6, 2.75))
     
-    matrix_map, atlas_threshold = apply_threshold(p_value_region[measure], atlas_region_coords)
+    matrix_map, atlas_threshold = apply_threshold(p_value_region[measure], atlas_region_coords, p_value)
     disp = plotting.plot_connectome(matrix_map, 
                                     atlas_threshold,
                                     figure=fig)
@@ -1062,7 +1063,7 @@ for measure in mean_measures_non_responders.keys():
 #%% Mann-Whitney U test
 stats_measures = {}
 p_values_mat = {}
-n_permut = 50000
+n_permut = 5000
 print('Computing Mann-Whitney U test ...')
 for measure in local_metrics:
     print(measure)
@@ -1527,7 +1528,7 @@ pval_grid, adj_grid = [], []
 
 for thresh_grid in threshold_grid:
     print(len(adj_grid))
-    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :responders_count], y=fitted_linear_connections_subjects[:, :, responders_count:], thresh=thresh_grid, method='mannwhitneyu', k=100)
+    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :responders_count], y=fitted_linear_connections_subjects[:, :, responders_count:], thresh=thresh_grid, method='mannwhitneyu', k=1000)
     pval_grid.append(pval)
     adj_grid.append(adj)
 
@@ -1632,7 +1633,7 @@ n = len(x)
 # 1. Difference network 
 _, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
 D = 1 - u_pvalue
-np.fill_diagonal(D, 0)
+# np.fill_diagonal(D, 0)
 #%% 
 # 2. First and second moments
 U = 2 # arg
@@ -1642,8 +1643,8 @@ D_bar = sp.special.logit(D)
 ## Convert -inf and +inf to random values
 idxinf = np.argwhere(D_bar <= -12)
 idxsup = np.argwhere(D_bar >= 12)
-neg = -12 + (-13 + 12) * np.random.rand(1)
-pos = 12 + (13 - 12) * np.random.rand(1)
+neg = -12 - 1 * np.random.rand(1)
+pos = 12 + 1 * np.random.rand(1)
 D_bar[idxinf[:, 0], idxinf[:, 1]] = neg
 D_bar[idxsup[:, 0], idxsup[:, 1]] = pos
 

@@ -732,7 +732,7 @@ atlas_threshold = apply_threshold(nbs_network, atlas_region_coords)
 disp = plotting.plot_connectome(nbs_network, 
                                 atlas_threshold,
                                 node_size=node_size,
-                                edge_threshold=2,
+                                edge_threshold=1,
                                 edge_cmap=mpl.colors.ListedColormap(['royalblue', 'dimgray', 'royalblue', 'dimgray', 'royalblue', 'dimgray']),
                                 figure=fig)
 
