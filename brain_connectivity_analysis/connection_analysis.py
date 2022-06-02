@@ -940,7 +940,7 @@ D = 1 - u_pvalue
 # np.fill_diagonal(D, 0)
 #%% 
 # 2. First and second moments
-U = 2 # arg
+U = 10 # arg
 D_bar = sp.special.logit(D)
 # D_bar[np.diag_indices(n)[0], np.diag_indices(n)[1]] = np.diag(D) # to verify
 
@@ -964,7 +964,7 @@ C = np.zeros((n, n, U))
 null = np.zeros((n, n ,U))
 
 for i in range(U):
-    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, m))
     C[:, :, i] = l @ l.T
     null[:, :, i] = sp.special.expit(C[:, :, i])
     
@@ -987,7 +987,7 @@ thresh_aDDT = sp.special.expit(ll)
 ## 4.2 eDDT
 # quant = np.zeros((U, ))
 # for i in range(U):
-#     l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+#     l = μ + np.sqrt(σsq) * np.random.normal(size=(n, m))
 #     C[:, :, i] = l @ l.T
 #     null[:, :, i] = sp.special.expit(C[:, :, i])
 #     quant[i] = np.percentile(C[:, :, i][np.triu_indices(n, 1)], 97.5)

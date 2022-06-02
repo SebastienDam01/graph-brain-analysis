@@ -45,7 +45,7 @@ def aDDT(m, μ, σsq):
     
     return thresh
 
-def eDDT(n, μ, σsq, U):
+def eDDT(n, m, μ, σsq, U):
     """
     Compute a threshold from the 95th quantile of the empirical critical value based on the empirical distribution.
 
@@ -53,6 +53,8 @@ def eDDT(n, μ, σsq, U):
     ----------
     n : int
         number of regions
+    m : int
+        max(2, \\(e^2 - \bar{e}^2) / \bar{v})
     μ : float
         first moment of the observed difference network.
     σsq : float
@@ -75,7 +77,7 @@ def eDDT(n, μ, σsq, U):
     null = np.zeros((n, n ,U))
     quant = np.zeros((U, ))
     for i in range(U):
-        l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U)) # standard normally distributed variables
+        l = μ + np.sqrt(σsq) * np.random.normal(size=(n, m)) # standard normally distributed variables
         C[:, :, i] = l @ l.T
         null[:, :, i] = sp.special.expit(C[:, :, i])
         quant[i] = np.percentile(C[:, :, i][np.triu_indices(n, 1)], 97.5) # empirical critical value
@@ -140,7 +142,7 @@ def DDT(x, y, method='aDDT', U=2):
     null = np.zeros((n, n ,U))
     
     for i in range(U):
-        l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+        l = μ + np.sqrt(σsq) * np.random.normal(size=(n, m))
         C[:, :, i] = l @ l.T
         null[:, :, i] = sp.special.expit(C[:, :, i])
         
@@ -151,7 +153,7 @@ def DDT(x, y, method='aDDT', U=2):
         print("mean of diagonal elements: {:,.2f}, expected value: {:,.2f} \n".format(np.mean(np.diag(C[:, :, i])), e))
     
     # 4. Adaptive threshold  
-    thresh = aDDT(m, μ, σsq) if method=='aDDT' else eDDT(n, μ, σsq, U)
+    thresh = aDDT(m, μ, σsq) if method=='aDDT' else eDDT(n, m, μ, σsq, U)
     
     # 5. Apply threshold 
     γ = sp.special.logit(thresh)
