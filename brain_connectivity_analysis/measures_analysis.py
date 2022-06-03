@@ -26,7 +26,7 @@ THRESHOLD = 0.3
 
 # Load variables from data_preprocessed.pickle
 with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders = pickle.load(f)
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders, medication = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
@@ -35,30 +35,34 @@ with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
 nb_ROI = len(connectivity_matrices[patients[0]])
 
 # TEMPORARY
-subjects_to_delete = ['lgp_081LJ',
+patients_to_delete = ['lgp_081LJ',
                       'lgp_096MS',
                       'lgp_086CA',
-                      'S168',
+                      'lgp_115LMR', # exclu
+                      'lgp_142JO', # age is NA
+                      'lgp_168CA'] # duration disease is NA
+controls_to_delete = ['S168',
                       'EMODES_003LS', # no info on excel
                       'EMODES_004ML']
+subjects_to_delete = patients_to_delete + controls_to_delete
 
 for subject in subjects_to_delete:
     if subject in patients:
         patients.remove(subject)
         patients_count -= 1
     else:
-        print(subject)
         controls.remove(subject)
         controls_count -= 1
         
 subject_count = subject_count - len(subjects_to_delete)
-# patients_count = patients_count - len(subjects_to_delete)
 
 connectivity_matrices = dict([(key, val) for key, val in 
            connectivity_matrices.items() if key not in subjects_to_delete])
 
 volumes_ROI = dict([(key, val) for key, val in 
            volumes_ROI.items() if key not in subjects_to_delete])
+
+medication = medication[~medication.ID.isin(patients_to_delete)]
 
 # Density fibers connectivity matrices
 def nb_fiber2density(matrices, volumes):
@@ -242,8 +246,8 @@ def glm_models(data_):
     ndarray
         Adjusted values for the response variable.
     """
-    glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
-    return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
+    glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
+    return np.array(data['Metric'] - (glm_linear.fittedvalues - np.mean(glm_linear.fittedvalues)))
 
 def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
@@ -270,6 +274,7 @@ def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
     p = mat_obs.shape[0]
     mat_permut = np.zeros((p, ntest))
+    c = int(np.floor(0.05 * ntest))
         
     # 1. randomize samples
     for t in range(ntest):
@@ -280,13 +285,18 @@ def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
         
         mat_permut[:, t], _ = sp.stats.mannwhitneyu(measures_subjects[measure][subset_A, :], measures_subjects[measure][subset_B, :])
         
-    # 2. unnormalized p-value
+    max_stat = np.max(mat_permut, axis=0)
+    
+    # 2. Single threshold test
+    t_max = np.sort(max_stat)[c]
+    
+    # 3. unnormalized p-value
     mat_pval = np.zeros((p, ))
     
     for j in range(p):
         mat_pval[j] = np.sum(mat_permut[j, :] >= mat_obs[j]) / ntest
             
-    return mat_pval
+    return t_max, mat_pval
 
 #%%
 # Network measures 
@@ -827,7 +837,7 @@ plt.xlabel('ROIs')
 plt.grid(False)
 plt.show()
 
-#%% Clinical characteristics 
+#%% Demographic measures 
 dict_keys = list(patient_info_dict.keys())
 for subject in dict_keys:
     if subject not in patients + controls or subject in subjects_to_delete or patient_info_dict[subject]['Age']=='':
@@ -837,7 +847,7 @@ age_patients = [int(i) for i in [patient_info_dict[key]['Age'] for key in patien
 age_controls = [int(i) for i in [patient_info_dict[key]['Age'] for key in patient_info_dict.keys() if key in controls]]
 gender_patients = [int(i) for i in [patient_info_dict[key]['Gender'] for key in patient_info_dict.keys() if key in patients]]
 gender_controls = [int(i) for i in [patient_info_dict[key]['Gender'] for key in patient_info_dict.keys() if key in controls]]
-#depression_duration = [int(i) for i in [patient_info_dict[key]['Duree_maladie'] for key in patient_info_dict.keys() if key in patients]]
+depression_duration = [float(i) for i in [patient_info_dict[key]['Duree_maladie'] for key in patient_info_dict.keys() if key in patients]]
 
 print("Number of males in patients:", gender_patients.count(1))
 print('Number of females in patients:', gender_patients.count(2))
@@ -847,7 +857,7 @@ print('Number of females in controls:', gender_controls.count(2))
 print("Patients - Age mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(age_patients), np.std(age_patients)))
 print("Controls - Age mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(age_controls), np.std(age_controls)))
 
-#print("Durée de dépression - Moyenne {:,.2f} et écart-type {:,.2f}".format(np.mean(depression_duration), np.std(depression_duration)))
+print("Durée de dépression - Moyenne {:,.2f} et écart-type {:,.2f}".format(np.mean(depression_duration), np.std(depression_duration)))
 
 p_value_clinical = {}
 _, p_value_clinical['Age'] = sp.stats.ttest_ind(age_patients, age_controls, permutations=5000, equal_var=False)
@@ -858,6 +868,13 @@ subjects = patients + controls
 df = pd.DataFrame({'Gender' : gender, 'Subject':subjects})
 contingency = pd.crosstab(df['Gender'], df['Subject'])
 _, p_value_clinical['Gender'], _, _ = sp.stats.chi2_contingency(contingency)
+
+#%% Clinical measures
+print("Patients - Medication load mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(medication['Medication load']), np.std(medication['Medication load'])))
+print("Percentage of patients having used antidepressant: {:,.2f}%".format((len(medication.loc[medication['A antidepresseur'] > 0]['A antidepresseur']) / patients_count) * 100))
+print("Percentage of patients having used mood stabilizer: {:,.2f}%".format((len(medication.loc[medication['B Mood stabilizeur'] > 0]['B Mood stabilizeur']) / patients_count) * 100))
+print("Percentage of patients having used antipsychotic: {:,.2f}%".format((len(medication.loc[medication['C antipsycho'] > 0]['C antipsycho']) / patients_count) * 100))
+print("Percentage of patients having used benzodiazepine: {:,.2f}%".format((len(medication.loc[medication['D Bzd'] > 0]['D Bzd']) / patients_count) * 100))
 
 ##############################
 #%% Graph metrics analysis
@@ -991,7 +1008,6 @@ for measure in measures_patients.keys():
 connections_controls = np.zeros((nb_ROI, nb_ROI, controls_count))
 connections_patients = np.zeros((nb_ROI, nb_ROI, patients_count))
 age = age_patients + age_controls
-
 #%% Fit GLM
 measures_subjects = {}
 for metric in local_metrics:
@@ -1003,6 +1019,7 @@ data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
     "Gender": gender,
+    "Medication_load": medication['Medication load'],
     "Metric": np.zeros(subject_count)
     })
 
@@ -1120,6 +1137,7 @@ for measure in mean_measures_controls.keys():
 #%% Mann-Whitney U test
 stats_measures = {}
 p_values_mat = {}
+t_max_measures = {}
 n_permut = 5000
 print('Computing Mann-Whitney U test ...')
 for measure in local_metrics:
@@ -1131,11 +1149,12 @@ for measure in local_metrics:
     
     stats_measures[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
     
-    p_values_mat[measure] = permutation_test(subset_controls,
+    t_max_measures[measure], p_values_mat[measure] =     permutation_test(subset_controls,
                                     subset_patients,
                                     stats_measures[measure],
                                     measure,
                                     n_permut)
+
     
 #%%
 def permutation_test_global(list_A, list_B, mat_obs, measure, ntest=5000):
@@ -1239,6 +1258,41 @@ for measure in mean_measures_controls.keys():
     plotting.show()
     i+=1
     
+#%% Export the regions exhibiting significative differences for each measure
+significative_regions = {}
+for measure in local_metrics:
+    significative_regions[measure] = []
+    for region_count in range(nb_ROI):
+        if p_values_mat[measure][region_count] < p_value:
+            significative_regions[measure].append(region_count)
+            
+significative_global_measures = []
+for measure in global_metrics:
+    if p_values_mat[measure] < 0.05:
+        significative_global_measures.append(measure)
+
+nb_features = sum((len(regions) for regions in significative_regions.values()))
+
+X_local = np.zeros((subject_count, nb_features))
+
+i=0
+for measure in local_metrics: 
+    if len(significative_regions[measure]) != 0:
+        for j in range(len(significative_regions[measure])):
+            X_local[:, i+j] = measures_subjects[measure][:, significative_regions[measure][j]]
+        i+=j+1
+
+X_global = np.zeros((subject_count, len(significative_global_measures)))
+i=0
+for measure in significative_global_measures:
+    X_global[:, i] = measures_subjects[measure]
+    i+=1
+
+
+with open('../manage_data/features_measures.pickle', 'wb') as f:
+    pickle.dump(
+        [X_local, 
+         X_global], f)
 #%% Without permutation tests
 #%% Mann-Whitney U test
 p_values_mat_wo_permut = {}
