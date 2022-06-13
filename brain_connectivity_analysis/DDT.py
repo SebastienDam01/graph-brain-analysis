@@ -86,7 +86,7 @@ def eDDT(n, m, μ, σsq, U):
     
     return thresh
 
-def DDT(x, y, method='aDDT', U=2):
+def DDT(x, y, method='aDDT', U=1000):
     """
     Difference degree test. 
 
@@ -116,7 +116,7 @@ def DDT(x, y, method='aDDT', U=2):
     # 1. Difference network 
     _, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
     D = 1 - u_pvalue
-    # np.fill_diagonal(D, 0)
+    np.fill_diagonal(D, 0)
     
     # 2. First and second moments
     D_bar = sp.special.logit(D)
@@ -183,7 +183,7 @@ def DDT(x, y, method='aDDT', U=2):
     d_obs_pvalued = copy.deepcopy(d_obs)
     d_obs_pvalued[pvalue_DDT == 1] = 0
     # Discard regions incident to less than 3 DWE
-    d_obs_pvalued[d_obs_pvalued < 3] = 0
+    # d_obs_pvalued[d_obs_pvalued < 3] = 0
     
     return d_obs_pvalued
 

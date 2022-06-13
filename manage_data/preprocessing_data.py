@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from scipy.io import loadmat
+import re 
 
 import seaborn as sns
 sns.set()
@@ -52,7 +53,8 @@ patient_keys = ['lgp']
 # information about the patients, such as their age, the duration of the 
 # disease, etc.
 csv_path = data_folder + "/table.csv"
-
+# Second table
+csv_june_path = data_folder + "/list_june.csv"
 
 # -
 
@@ -86,14 +88,12 @@ for f in get_matrix_file_list(data_folder, suffix):
 # at csv_path (by default 'data_foler/table.csv')
 patient_info_dict = {}
 
-
 with open(csv_path, 'r') as csv_file:
     metadata = csv.DictReader(csv_file)
     # Each patient is associated to a dictionnary containing all its information
     for row in metadata:
         metadata_dict = {key:row[key] for key in metadata.fieldnames if key != 'Subject'}
         patient_info_dict[row['Subject']] = metadata_dict
-
      
 print("Succesfully loaded {} matrices from {}.".format(len(connectivity_matrices), data_folder))
 print("Metadata has been found in {} for {} subjects.".format(csv_path,len(patient_info_dict)))
@@ -152,21 +152,45 @@ print("Empty matrices:", null_matrices)
 print("Diagonal matrices:", diag_matrices)
 
 #%% responders vs non-responders
-response_df = pd.read_csv('../data/Table_data.csv')
- 
+response_df = pd.read_csv('../data/table_rep.csv')
 old_ID = list(response_df['ID'])
 new_ID = []
+unknown_ID = [] # subjects for whose the connectivity matrix does not exist
 for ID in response_df['ID']:
+    found = False
     for patient in patients:
-        if ID[-5:] == patient[-5:]:
+        if re.findall("\d+", ID)[0] == re.findall("\d+", patient)[0]:# if ID[-5:] == patient[-5:]:
             new_ID.append(patient)   
+            found = True
+    if not found: 
+        old_ID.remove(ID)
+        unknown_ID.append(ID)
 
 response_df = response_df.replace(old_ID, new_ID)
 
-responders = list(response_df.loc[response_df['rep'].isin([1])]['ID'])
-non_responders = list(response_df.loc[response_df['rep'].isin([0])]['ID'])
+responders = list(response_df.loc[response_df['Rep_M6_MADRS'].isin([1])]['ID'])
+non_responders = list(response_df.loc[response_df['Rep_M6_MADRS'].isin([0])]['ID'])
 
-print("Classified {} responders and {} non-responders".format(len(responders), len(non_responders)))
+print("\nClassified {} responders and {} non-responders".format(len(responders), len(non_responders)))
+
+#%% Medication load
+medication = pd.read_csv(csv_june_path)
+old_ID = list(medication['ID'])
+new_ID = []
+unknown_ID = [] # subjects for whose the connectivity matrix does not exist
+for ID in medication['ID']:
+    found = False
+    for patient in patients:
+        if re.findall("\d+", ID)[0] == re.findall("\d+", patient)[0]: # substring of numbers => we only compare the ID number between the two lists
+            new_ID.append(patient) 
+            found = True
+    if not found: 
+        old_ID.remove(ID)
+        unknown_ID.append(ID)
+        
+# remove unknown subjects
+medication = medication[~medication.ID.isin(unknown_ID)]
+medication = medication.replace(old_ID, new_ID)
 
 #%% Dump data
 
@@ -180,4 +204,6 @@ with open('../manage_data/data_preprocessed.pickle', 'wb') as f:
           subject_count,
           patient_info_dict,
           responders, 
-          non_responders], f)
+          non_responders,
+          response_df,
+          medication], f)

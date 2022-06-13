@@ -22,13 +22,13 @@ sns.set()
 
 sys.path.append('../utils')
 #sys.path.insert(0, '../utils')
-from utils import printProgressBar
+#from utils import printProgressBar
 
 THRESHOLD = 0.3
 
 # Load variables from data_preprocessed.pickle
 with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders = pickle.load(f)
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders, response_df, medication = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
@@ -41,8 +41,8 @@ non_responders_count = len(non_responders)
 subject_count = responders_count + non_responders_count
 
 # TEMPORARY
-subjects_to_delete = ['lgp_081LJ',
-                      'lgp_096MS']
+subjects_to_delete = ['lgp_168CA' # duration disease is NA
+                      ]
 
 for subject in subjects_to_delete:
     if subject in responders:
@@ -60,6 +60,29 @@ connectivity_matrices = dict([(key, val) for key, val in
 
 volumes_ROI = dict([(key, val) for key, val in 
            volumes_ROI.items() if key not in subjects_to_delete])
+
+
+def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+    """
+    https://stackoverflow.com/questions/3173320/text-progress-bar-in-terminal-with-block-characters/34325723#34325723
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+        printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
+    # Print New Line on Complete
+    if iteration == total: 
+        print()
 
 # Density fibers connectivity matrices
 def nb_fiber2density(matrices, volumes):
@@ -244,8 +267,8 @@ def glm_models(data_):
     ndarray
         Adjusted values for the response variable.
     """
-    glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
-    return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
+    glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender + Depression_duration', data_).fit()
+    return np.array(data['Metric'] - (glm_linear.fittedvalues - np.mean(glm_linear.fittedvalues)))
 
 def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
@@ -772,16 +795,13 @@ count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivit
 connectivity_matrices = nb_fiber2density(connectivity_matrices, volumes_ROI)
 
 #%% Clinical characteristics 
-dict_keys = list(patient_info_dict.keys())
-for subject in dict_keys:
-    if subject not in responders + non_responders or subject in subjects_to_delete or patient_info_dict[subject]['Age']=='':
-        del patient_info_dict[subject]
         
 age_responders = [int(i) for i in [patient_info_dict[key]['Age'] for key in patient_info_dict.keys() if key in responders]]
 age_non_responders = [int(i) for i in [patient_info_dict[key]['Age'] for key in patient_info_dict.keys() if key in non_responders]]
 gender_responders = [int(i) for i in [patient_info_dict[key]['Gender'] for key in patient_info_dict.keys() if key in responders]]
 gender_non_responders = [int(i) for i in [patient_info_dict[key]['Gender'] for key in patient_info_dict.keys() if key in non_responders]]
-#depression_duration = [int(i) for i in [patient_info_dict[key]['Duree_maladie'] for key in patient_info_dict.keys() if key in responders]]
+depression_duration = response_df.loc[:, 'duree_ma_M0']
+depression_duration = depression_duration.dropna()
 
 print("Number of males in responders:", gender_responders.count(1))
 print('Number of females in responders:', gender_responders.count(2))
@@ -791,7 +811,7 @@ print('Number of females in non_responders:', gender_non_responders.count(2))
 print("responders - Age mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(age_responders), np.std(age_responders)))
 print("non_responders - Age mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(age_non_responders), np.std(age_non_responders)))
 
-#print("Durée de dépression - Moyenne {:,.2f} et écart-type {:,.2f}".format(np.mean(depression_duration), np.std(depression_duration)))
+print("Durée de dépression - Moyenne {:,.2f} et écart-type {:,.2f}".format(np.mean(depression_duration), np.std(depression_duration)))
 
 p_value_clinical = {}
 _, p_value_clinical['Age'] = sp.stats.ttest_ind(age_responders, age_non_responders, permutations=5000, equal_var=False)
@@ -947,6 +967,7 @@ data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
     "Gender": gender,
+    "Depression_duration": depression_duration,
     "Metric": np.zeros(subject_count)
     })
 
@@ -957,7 +978,7 @@ for metric in global_metrics:
 for metric in local_metrics:
     print(metric)
     # measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
-    for region in tqdm(range(nb_ROI)):
+    for region in range(nb_ROI):
         data["Metric"] = measures_subjects[metric][:, region]
         measures_subjects[metric][:, region] = glm_models(data)
 
@@ -1001,6 +1022,12 @@ _, p_value_region['global_strength'] = sp.stats.ttest_ind(measures_subjects['glo
 for measure in p_value_region.keys():
     if measure in local_metrics:
         print(measure, "- Number of p_value inferior to 0.05/80:", (p_value_region[measure] < 0.05).sum())
+
+#%% FDR correction
+p_value_fdr_region = {}
+res_fdr_region = {}
+for measure in local_metrics:
+    res_fdr_region[measure], p_value_fdr_region[measure], _, _ = multipletests(p_value_region[measure], alpha=0.05, method='fdr_bh')
         
 #%% Plot values and significant differences - Local measures
 atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
@@ -1039,7 +1066,10 @@ for measure in mean_measures_non_responders.keys():
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
             # Bonferroni correction
-            if p_value_region[measure][region_count] < p_value:
+            # if p_value_region[measure][region_count] < p_value:
+            #     plt.axvline(x=region_count, linestyle='--', color='red')
+            # FDR correction
+            if res_fdr_region[measure][region_count]:
                 plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
@@ -1130,6 +1160,12 @@ for measure in global_metrics:
                                     measure,
                                     5000)
     
+#%% FDR correction
+p_values_fdr_mat= {}
+res_fdr_mat = {}
+for measure in local_metrics:
+    res_fdr_mat[measure], p_values_fdr_mat[measure], _, _ = multipletests(p_values_mat[measure], alpha=0.05, method='fdr_bh')
+    
 #%% Plot values and significant differences - Local measures
 pvalue = 0.05
 i=0
@@ -1155,14 +1191,18 @@ for measure in mean_measures_non_responders.keys():
     
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
-            if p_values_mat[measure][region_count] < pvalue:
+            # Bonferroni correction
+            # if p_values_mat[measure][region_count] < p_value:
+            #     plt.axvline(x=region_count, linestyle='--', color='red')
+            # FDR correction
+            if res_fdr_region[measure][region_count]:
                 plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
     plt.title(measures_networks[i] + ' - Mann-Whitney U test - ' + str(n_permut) + ' permutation tests' + ' - p-value=' + str(pvalue), fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
-    plt.savefig('graph_pictures/mann-whitney/response/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
+    # plt.savefig('graph_pictures/mann-whitney/response/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
     plt.show()
     
     fig = plt.figure(figsize=(6, 2.75))
@@ -1179,7 +1219,7 @@ for measure in mean_measures_non_responders.keys():
                                     atlas_threshold,
                                     figure=fig)
 
-    disp.savefig('graph_pictures/mann-whitney/response/' + str(n_permut) + '/' + measures_networks[i] + '_brain.pdf')
+    # disp.savefig('graph_pictures/mann-whitney/response/' + str(n_permut) + '/' + measures_networks[i] + '_brain.pdf')
     plotting.show()
     i+=1
     

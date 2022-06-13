@@ -26,7 +26,7 @@ THRESHOLD = 0.3
 
 # Load variables from data_preprocessed.pickle
 with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders, medication = pickle.load(f)
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders, response_df, medication = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
@@ -72,7 +72,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
+                mat[i, j] = 2 * mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
 
@@ -246,8 +246,72 @@ def glm_models(data_):
     ndarray
         Adjusted values for the response variable.
     """
+    # glm_patients = sm.GLM.from_formula('Metric ~ Age + Gender', data_.iloc[:patients_count, :]).fit()
+    # glm_controls = sm.GLM.from_formula('Metric ~ Age + Gender', data_.iloc[patients_count:, :]).fit()
+    
     glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
+
     return np.array(data['Metric'] - (glm_linear.fittedvalues - np.mean(glm_linear.fittedvalues)))
+
+def plot_test(p_values, measures, p_value=0.05, test_method='mannwhitneyu', correction_method='bonferroni', n_permutations='5000', save_fig=False):
+    i=0
+    for measure in mean_measures_controls.keys():
+        plt.figure(figsize=(18, 5))
+        plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
+        plt.fill_between(np.linspace(0,79,80), 
+                         mean_measures_controls[measure] - std_measures_controls[measure], 
+                         mean_measures_controls[measure] + std_measures_controls[measure],
+                         alpha=0.25,
+                         color='cyan',
+                         edgecolor='steelblue',
+                         linewidth=2)
+        
+        plt.plot(mean_measures_patients[measure], marker='o', color='black', label='patients')
+        plt.fill_between(np.linspace(0,79,80), 
+                         mean_measures_patients[measure] - std_measures_patients[measure], 
+                         mean_measures_patients[measure] + std_measures_patients[measure],
+                         alpha=0.5,
+                         color='darkgray',
+                         edgecolor='dimgray',
+                         linewidth=2)
+        
+        for region_count in range(nb_ROI):
+            if measure != 'charac_path' and measure != 'global_efficiency':
+                # Bonferroni correction
+                if correction_method=='bonferroni':
+                    if p_values_mat[measure][region_count] < p_value:
+                        plt.axvline(x=region_count, linestyle='--', color='red')
+                elif correction_method=='fdr':
+                    # FDR correction
+                    if res_fdr_mat[measure][region_count]:
+                        plt.axvline(x=region_count, linestyle='--', color='red')
+        plt.ylabel(measures_networks[i])
+        plt.xlabel('Regions of Interest (80 ROIs)')
+        plt.title(measures_networks[i] + ' - ' + test_method + ' - ' + n_permutations + ' permutations' + ' - p value=' + str(p_value), fontweight='bold', loc='center', fontsize=16)
+        plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+        plt.legend()
+        if save_fig:
+            plt.savefig('graph_pictures/' + test_method + '/' + n_permutations + '/' + measures_networks[i] + '.pdf')
+        plt.show()
+        
+        fig = plt.figure(figsize=(6, 2.75))
+        
+        matrix_map, atlas_threshold = apply_threshold(p_values_mat[measure], atlas_region_coords, p_value)
+        
+        # remove dot at the center
+        atlas_threshold[atlas_threshold==0] = 'nan'
+        
+        # No significative nodes
+        if len(np.unique(matrix_map)) == 1 and len(np.unique(atlas_threshold)) == 1:
+            matrix_map, atlas_threshold = np.zeros((0, 0)), np.zeros((0, 3))
+        disp = plotting.plot_connectome(matrix_map, 
+                                        atlas_threshold,
+                                        figure=fig)
+        
+        if save_fig:
+            disp.savefig('graph_pictures/' + test_method + '/' + n_permutations + '/' + measures_networks[i] + '_brain.pdf')
+        plotting.show()
+        i+=1
 
 def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
@@ -1015,11 +1079,19 @@ for metric in local_metrics:
 for metric in global_metrics:
     measures_subjects[metric] = np.hstack((metrics_patients[metric], metrics_controls[metric]))
 
+# is_patient = np.concatenate((np.ones(patients_count,), np.zeros(controls_count,)))
+
+# no_depression_duration = np.empty((controls_count, ))
+# no_depression_duration[:]=np.NaN
+depression_duration = [float(i) for i in [patient_info_dict[key]['Duree_maladie'] for key in patient_info_dict.keys() if key in patients]]
+depression_duration = np.hstack((depression_duration, np.zeros((controls_count,))))
+
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
     "Gender": gender,
-    "Medication_load": medication['Medication load'],
+    #"Is_patient": is_patient,
+    #"Depression_duration": depression_duration,
     "Metric": np.zeros(subject_count)
     })
 
@@ -1030,7 +1102,7 @@ for metric in global_metrics:
 for metric in local_metrics:
     print(metric)
     # measures_subjects[metric] = np.zeros((subject_count, nb_ROI))
-    for region in tqdm(range(nb_ROI)):
+    for region in range(nb_ROI):
         data["Metric"] = measures_subjects[metric][:, region]
         measures_subjects[metric][:, region] = glm_models(data)
 
@@ -1076,6 +1148,13 @@ for measure in p_value_region.keys():
     if measure in local_metrics:
         print(measure, "- Number of p_value inferior to 0.05/80:", (p_value_region[measure] < 0.05/80).sum())
         
+#%% FDR correction 
+from statsmodels.stats.multitest import multipletests
+p_value_fdr_region = {}
+res_fdr_region = {}
+for measure in local_metrics:
+    res_fdr_region[measure], p_value_fdr_region[measure], _, _ = multipletests(p_value_region[measure], alpha=0.05, method='fdr_bh')
+    
 #%% Plot values and significant differences - Local measures
 p_value = 0.05/80
 atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
@@ -1115,6 +1194,9 @@ for measure in mean_measures_controls.keys():
             # Bonferroni correction
             if p_value_region[measure][region_count] < p_value:
                 plt.axvline(x=region_count, linestyle='--', color='red')
+            # FDR correction
+            #if res_fdr_region[measure][region_count]:
+            #    plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
     plt.title(measures_networks[i] + ' - Welch test - ' + str(n_permut) + ' permutation tests', fontweight='bold', loc='center', fontsize=16)
@@ -1154,7 +1236,11 @@ for measure in local_metrics:
                                     stats_measures[measure],
                                     measure,
                                     n_permut)
-
+    
+#%%
+signif_regions_max_stat = {}
+for measure in local_metrics:
+    signif_regions_max_stat[measure] = np.array(np.where(stats_measures[measure] > t_max_measures[measure])).T
     
 #%%
 def permutation_test_global(list_A, list_B, mat_obs, measure, ntest=5000):
@@ -1205,6 +1291,11 @@ for measure in global_metrics:
                                     measure,
                                     5000)
     
+#%% FDR correction
+p_values_fdr_mat = {}
+res_fdr_mat = {}
+for measure in local_metrics:
+    res_fdr_mat[measure], p_values_fdr_mat[measure], _, _ = multipletests(p_values_mat[measure], alpha=0.05, method='fdr_bh')
 #%% Plot values and significant differences - Local measures
 p_value = 0.05/80
 i=0
@@ -1230,8 +1321,12 @@ for measure in mean_measures_controls.keys():
     
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
+            # Bonferroni correction
             if p_values_mat[measure][region_count] < p_value:
                 plt.axvline(x=region_count, linestyle='--', color='red')
+            # FDR correction
+            # if res_fdr_mat[measure][region_count]:
+            #     plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
     plt.title(measures_networks[i] + ' - Mann-Whitney U test - ' + str(n_permut) + ' permutation tests' + ' - p value=' + '0.05/80', fontweight='bold', loc='center', fontsize=16)
