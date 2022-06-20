@@ -191,7 +191,7 @@ def glm_models(data_):
         Adjusted values for the response variable.
     """
     glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
-    return np.array(data['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
+    return np.array(data_['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
 
 # Switcher class for multiple algorithms
 # https://www.davidsbatista.net/blog/2018/02/23/model_optimization/
@@ -301,6 +301,14 @@ for i in tqdm(range(nb_ROI)):
             data["Metric"] = connections_subjects[i, j, :]
             fitted_linear_connections_subjects[i, j, :] = glm_models(data)
 
+#%% pickle connections
+x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
+y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
+with open('../manage_data/connection_analysis.pickle', 'wb') as f:
+    pickle.dump(
+        [x, 
+         y], f)
+    
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
@@ -499,13 +507,13 @@ shapiro_mat = shapiro_mat + shapiro_mat.T
 
 np.fill_diagonal(shapiro_mat, 0)
 p_value_connection_bounded = copy.deepcopy(shapiro_mat)
-p_value_connection_bounded[p_value_connection_bounded > 0.001] = 1
+p_value_connection_bounded[p_value_connection_bounded > 0.05] = 1
 # dirty
 p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounded)
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('Shapiro test par connexion, p < 0.001')
+plt.title('Shapiro test par connexion, p < 0.05')
 #plt.savefig('graph_pictures/ttest_connections_Bonferroni.png', dpi=600)
 plt.show()
 

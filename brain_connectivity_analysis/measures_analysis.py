@@ -32,6 +32,9 @@ with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
     volumes_ROI = pickle.load(f)
     
+patients.sort()
+controls.sort()
+    
 nb_ROI = len(connectivity_matrices[patients[0]])
 
 # TEMPORARY
@@ -40,7 +43,14 @@ patients_to_delete = ['lgp_081LJ',
                       'lgp_086CA',
                       'lgp_115LMR', # exclu
                       'lgp_142JO', # age is NA
-                      'lgp_168CA'] # duration disease is NA
+                      'lgp_168CA', # duration disease is NA
+                      'lgp_073RN', # no medication load
+                      'lgp_174LP', 
+                      'lgp_175PP', 
+                      'lgp_176CJ',
+                      'lgp_177DJ',
+                      'lgp_178JB',
+                      ] 
 controls_to_delete = ['S168',
                       'EMODES_003LS', # no info on excel
                       'EMODES_004ML']
@@ -246,12 +256,12 @@ def glm_models(data_):
     ndarray
         Adjusted values for the response variable.
     """
-    # glm_patients = sm.GLM.from_formula('Metric ~ Age + Gender', data_.iloc[:patients_count, :]).fit()
-    # glm_controls = sm.GLM.from_formula('Metric ~ Age + Gender', data_.iloc[patients_count:, :]).fit()
     
-    glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
+    glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender + Depression_duration + Medication_load', data_).fit()
+    # glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
 
-    return np.array(data['Metric'] - (glm_linear.fittedvalues - np.mean(glm_linear.fittedvalues)))
+
+    return np.array(data_['Metric'] - (glm_linear.fittedvalues - np.mean(glm_linear.fittedvalues)))
 
 def plot_test(p_values, measures, p_value=0.05, test_method='mannwhitneyu', correction_method='bonferroni', n_permutations='5000', save_fig=False):
     i=0
@@ -1036,7 +1046,6 @@ for control in controls:
     printProgressBar(control_idx, controls_count, prefix = 'Controls progress:', suffix = 'Complete', length = 50)
 
 print("Metrics successfully computed.")
-    
 #%% Measures for each region
 measures_patients = {}
 for measure in metrics_patients.keys():
@@ -1051,7 +1060,10 @@ for measure in metrics_controls.keys():
         measures_controls[measure] = np.zeros((controls_count, nb_ROI))
         for control_count in range(len(metrics_controls[measure])):
             measures_controls[measure][control_count, :] = metrics_controls[measure][control_count]
-            
+
+# FIXME
+test = copy.deepcopy(measures_patients)
+test2 = copy.deepcopy(measures_controls)            
 #%% Mean and std measures of each region
 mean_measures_patients = {} # mean value of the measures per region
 std_measures_patients = {} # standard deviation of the measures per region
@@ -1081,17 +1093,18 @@ for metric in global_metrics:
 
 # is_patient = np.concatenate((np.ones(patients_count,), np.zeros(controls_count,)))
 
-# no_depression_duration = np.empty((controls_count, ))
-# no_depression_duration[:]=np.NaN
 depression_duration = [float(i) for i in [patient_info_dict[key]['Duree_maladie'] for key in patient_info_dict.keys() if key in patients]]
 depression_duration = np.hstack((depression_duration, np.zeros((controls_count,))))
+medication_load = medication['Medication load']
+medication_load = np.hstack((medication_load, np.zeros((controls_count,))))
 
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
     "Gender": gender,
     #"Is_patient": is_patient,
-    #"Depression_duration": depression_duration,
+    "Depression_duration": depression_duration - np.mean(depression_duration, axis=0),
+    "Medication_load": medication_load,
     "Metric": np.zeros(subject_count)
     })
 
@@ -1130,7 +1143,12 @@ for measure in measures_patients.keys():
     if measure in local_metrics:
         mean_measures_controls[measure] = np.mean(measures_controls[measure], axis=0)
         std_measures_controls[measure] = np.std(measures_controls[measure], axis=0)
-    
+
+#%% Normality test 
+shapiro_pval = {}
+for measure in local_metrics:
+    for region in range(nb_ROI):
+        _, shapiro_pval[measure] = sp.stats.shapiro(measures_subjects[measure][:,region])
 #%% Statistical test for each region
 p_value_region = {}
 n_permut=5000
@@ -1217,11 +1235,13 @@ for measure in mean_measures_controls.keys():
     i+=1
 
 #%% Mann-Whitney U test
-stats_measures = {}
+U1 = {}
+U2 = {}
+U = {}
 p_values_mat = {}
 t_max_measures = {}
 n_permut = 5000
-print('Computing Mann-Whitney U test ...')
+print('Computing Mann-Whitney test ...')
 for measure in local_metrics:
     print(measure)
     # stats_measures[measure] = np.zeros((nb_ROI,))
@@ -1229,13 +1249,18 @@ for measure in local_metrics:
     subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # shuffle index, actually not needed
     subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # shuffle index, actually not needed
     
-    stats_measures[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
-    
-    t_max_measures[measure], p_values_mat[measure] =     permutation_test(subset_controls,
-                                    subset_patients,
-                                    stats_measures[measure],
-                                    measure,
-                                    n_permut)
+    U1[measure] = np.zeros((nb_ROI, ))
+    for i in range(nb_ROI):
+        U1[measure][i], _ = sp.stats.mannwhitneyu(measures_patients[measure][:, i], measures_controls[measure][:, i])
+        U2[measure] = patients_count * controls_count - U1[measure]
+        U[measure] = np.minimum(U1[measure], U2[measure])
+
+        # Need to change in 'permutation_test' the method if the latest was changed !!!
+        t_max_measures[measure], p_values_mat[measure] =     permutation_test(subset_controls,
+                                        subset_patients,
+                                        U[measure],
+                                        measure,
+                                        n_permut)
     
 #%%
 signif_regions_max_stat = {}
@@ -1299,7 +1324,7 @@ for measure in local_metrics:
 #%% Plot values and significant differences - Local measures
 p_value = 0.05/80
 i=0
-for measure in mean_measures_controls.keys():
+for measure in local_metrics:
     plt.figure(figsize=(18, 5))
     plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
     plt.fill_between(np.linspace(0,79,80), 
