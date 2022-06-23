@@ -52,15 +52,13 @@ def raw_statistics(x, y, method='f'):
     # copy upper triangle to lower to obtain symmetric matrix
     statistics = statistics + statistics.T - np.diag(np.diag(statistics))
     
-    # FIXME: what do we do with nan ?
     if (np.isnan(statistics)).sum() > 0:
-        statistics = np.nan_to_num(statistics, -1)
-    # FIXME: should we compute absolute stats ? 
+        statistics = np.nan_to_num(statistics, 0)
     return abs(statistics)
 
 def range_of_thresholds(statistics_, dh=100):
-    #s_max = np.max(statistics) 
-    s_max = np.percentile(statistics_, 95) # take the 95th percentile because the data fluctuates too much for big values (> 4)
+    # s_max = np.max(statistics_) 
+    s_max = np.percentile(statistics_, 99.5) # take the 95th percentile because the data fluctuates too much for big values (> 4)
     s_min = np.min(statistics_)
     if s_min==0: # for mannwhitneyu specifically
         s_min = np.min(statistics_[np.where(statistics_ != 0)])
@@ -79,16 +77,11 @@ def tfnbs(statistics, thresh, E=0.5, H=3):
         thresh_stats = np.zeros((n, n))
         
         # threshold
-        ind_t = np.argwhere(statistics > thresh[h])
-        
+        ind_t, = np.where(list(statistics[np.triu_indices(80, 1)]) > thresh[h])
+
         # suprathreshold adjacency matrix
         thresh_stats[(ixes[0][ind_t], ixes[1][ind_t])] = 1
-        # adj[ixes][ind_t]=1
         thresh_stats = thresh_stats + thresh_stats.T
-    
-        for i, j in ind_t:
-            thresh_stats[i, j] = 1
-            thresh_stats[j, i] = 1
             
         # find connected components
         a, sz = clustering.get_components(thresh_stats)
@@ -143,10 +136,6 @@ def permutation_test(x_, y_, mat_obs, alpha, method='f', ntest=1000, E=0.5, H=3)
         random.shuffle(concat_subset)
         subset_A, subset_B = concat_subset[:group_A_count], concat_subset[group_A_count:]
         
-        # for i in range(p):
-        #     for j in range(p): 
-        #         mat_permut[i, j, t], _ = f_test(xy[i, j, subset_A], xy[i, j, subset_B])
-        
         mat_permut[:, :, t] = raw_statistics(xy[:, :, subset_A], xy[:, :, subset_B], method=method)
         
         thresholds.append(range_of_thresholds(mat_permut[:, :, t]))
@@ -183,32 +172,193 @@ if __name__ == '__main__':
     ###
     method='f'
     dh=100
-    E=0.75
-    H=3.5
-    ntest=1000
+    E=0.5
+    H=2.75
+    ntest=5000
     ###
     raw_stats = raw_statistics(x, y, method)
     thresholds = range_of_thresholds(raw_stats, dh)
     tfnbs_matrix = tfnbs(raw_stats, thresholds, E, H)
     t_max, pval_corrected = permutation_test(x, y, tfnbs_matrix, method=method, alpha=0.05, ntest=ntest, E=E, H=H)
     
+#%% iterations over parameters E, H
+tfnbs_matrix_list = []
+tfnbs_matrix_stats_list = []
+pval_corrected_list = []
+test=[]
+E_list = [0.5, 0.75]
+H_list = np.arange(2.25, 3.55, 0.05)
+for E in E_list:
+    for H in H_list:
+        if E == 0.5:
+            if H > 3:
+                continue
+        if E == 0.75: 
+            if H < 2.95:
+                continue
+        print("H = {:,.2f}".format(H))
+        test.append((E,H))
+        tfnbs_matrix = tfnbs(raw_stats, thresholds, E, H)
+        t_max, pval_corrected = permutation_test(x, y, tfnbs_matrix, method=method, alpha=0.05, ntest=ntest, E=E, H=H)
+        
+        tfnbs_matrix_list.append(tfnbs_matrix)
+        tfnbs_max_stats =  np.zeros((80, 80))# copy.deepcopy(tfnbs_matrix)
+        tfnbs_max_stats[tfnbs_matrix > t_max] = 1
+        tfnbs_matrix_stats_list.append(tfnbs_max_stats)
+        pval_corrected_list.append(pval_corrected)
+
+#%% E=0.5
+# https://www.delftstack.com/fr/howto/matplotlib/how-to-display-multiple-images-in-one-figure-correctly-in-matplotlib/ 
+width=20
+height=20
+rows = 3
+cols = 5
+         
+figure, axes = plt.subplots(nrows=rows, ncols=cols, figsize=(width, height))
+plt.subplots_adjust(hspace=-0.7)
+figure.suptitle("TFNBS", fontsize=20, y=0.85)
+
+for cnt, b in enumerate(axes.flat):
+    b.imshow(tfnbs_matrix_stats_list[cnt])
+    b.set_title("H = {:,.2f}".format(H_list[cnt]))
+    
+figure.tight_layout()
+plt.show()
+
+#%% E=0.75
+width=20
+height=20
+rows = 2
+cols = 5
+         
+figure, axes = plt.subplots(nrows=rows, ncols=cols, figsize=(width, height))
+plt.subplots_adjust(hspace=-0.7)
+figure.suptitle("TFNBS", fontsize=20, y=0.85)
+
+for cnt, b in enumerate(axes.flat):
+    b.imshow(tfnbs_matrix_stats_list[16+cnt])
+    b.set_title("H = {:,.2f}".format(H_list[16+cnt]))
+    
+figure.tight_layout()
+plt.show()
+
+#%%
+# for i in range(dh):
+#     plt.imshow(tfnbs_matrix[:,:,i])
+#     plt.show()
+
+#%%
+# def comp(matrix):
+#     n=len(matrix)
+#     connected_comp = np.zeros((n, n))
+    
+#     ixes = np.where(np.triu(np.ones((n, n)), 1))
+#     ind_t, = np.where(matrix[np.triu_indices(n, 1)] > 0)
+#     print(ind_t)
+#     # suprathreshold adjacency matrix
+#     connected_comp[(ixes[0][ind_t], ixes[1][ind_t])] = 1
+#     connected_comp = connected_comp + connected_comp.T
+    
+#     plt.imshow(connected_comp)
+    
+#     a, sz = clustering.get_components(connected_comp)
+    
+#     # replace matrix element value by each component size
+#     # convert size from nodes to number of edges
+#     # only consider components comprising more than one node (e.g. a/l 1 edge)
+#     ind_sz, = np.where(sz > 1)
+#     ind_sz += 1
+#     nr_components = np.size(ind_sz)
+#     sz_links = np.zeros((nr_components,))
+#     for i in range(nr_components):
+#         nodes, = np.where(ind_sz[i] == a)
+#         sz_links[i] = np.sum(connected_comp[np.ix_(nodes, nodes)]) / 2
+#         connected_comp[np.ix_(nodes, nodes)] *= (i + 2)
+    
+#     # subtract 1 to delete any edges not comprising a component
+#     connected_comp[np.where(connected_comp)] -= 1
+    
+#     return connected_comp
+
+# test=comp(tfnbs_max_stats)
+
+# def comp(matrix):
+#     n=len(matrix)
+#     copy_matrix = copy.deepcopy(matrix)
+#     unique = list(np.unique(copy_matrix))
+#     for ind, value in enumerate(unique):
+#         for i in range(n):
+#             for j in range(n):
+#                 if copy_matrix[i, j] == value:
+#                     copy_matrix[i, j] = ind
+                    
+#     return copy_matrix
+
+# test=comp(tfnbs_max_stats)
 #%% corrected
 import copy 
+# import matplotlib as mpl
 
-tfnbs_max_stats = np.zeros((80, 80))
+tfnbs_max_stats =  np.zeros((80, 80))# copy.deepcopy(tfnbs_matrix)
 tfnbs_max_stats[tfnbs_matrix > t_max] = 1
-# dirty
+
+# fig, ax = plt.subplots()
+# cmap = mpl.cm.get_cmap('tab20', len(np.unique(test)))
+# im = plt.imshow(test, cmap=cmap, vmin=0, vmax=len(np.unique(test)), aspect=1, interpolation="none")
+# fig.colorbar(im, ticks=range(len(np.unique(test))), orientation="vertical", fraction=0.05, pad=0.04)
+
 plt.imshow(tfnbs_max_stats, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
+plt.xticks(np.arange(0, 80, 10))
+plt.yticks(np.arange(0, 80, 10))
 alpha=0.05
-plt.title('TFNBS - {} test - E = {} - H = {} - alpha = {}'.format(method, E, H, alpha))
-    
-#%% uncorrected
-plt.imshow(pval_corrected)
-plt.title('{} test - E = {} - H = {}'.format(method, E, H))
-plt.show()
+plt.title('TFNBS - {} test - E={} - H={} - \nalpha={} - n_permut={}'.format(method, E, H, alpha, ntest))
+plt.savefig('graph_pictures/tfnbs/E=0.5/tfnbs_' + 'H=' + str(H) + '_' + str(ntest) + '.pdf')
 
+#%% plot connectome
+from nilearn import plotting
+
+def apply_threshold(input_, atlas):
+    '''
+    Set values which are lesser than threshold to 0.
+
+    Parameters
+    ----------
+    input_ : Nx1 or NxN np.ndarray
+        p values or squared matrix
+    threshold : float
+
+    Returns
+    -------
+    dictionary_copy : NxN np.ndarray
+        copy of the matrix where the threshold was applied
+
+    '''
+    atlas_copy = copy.deepcopy(atlas)
+    
+    if len(input_.shape) == 2: # matrix NxN  
+        indices_set_to_zero = []
+        indices_set_to_zero.append([index for index in range(len(input_)) if (
+            np.unique(input_[:, index] == 0)[0])]
+            )
+        atlas_copy[indices_set_to_zero, :] = 0
+    
+        return atlas_copy
+    
+atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
+
+fig = plt.figure(figsize=(6, 2.75))
+
+atlas_threshold = apply_threshold(tfnbs_max_stats, atlas_region_coords)
+disp = plotting.plot_connectome(tfnbs_max_stats, 
+                                atlas_threshold,
+                                figure=fig)
+
+# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
+plotting.show()
+
+#%% uncorrected
 alpha=0.05
 pval_corrected_alpha = copy.deepcopy(pval_corrected)
 pval_corrected_alpha[pval_corrected_alpha > 0.05] = 1
