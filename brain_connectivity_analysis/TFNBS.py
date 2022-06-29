@@ -8,16 +8,36 @@ import argparse
 import pickle
 import random
 from tqdm import tqdm
+import copy
+
+import seaborn as sns
+sns.set()
+
+def create_arg_parser():
+    parser = argparse.ArgumentParser(prog=__file__, description=""" Threshold-free Network-Based Statistics (TFNBS)""", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    return parser
+
+def add_arguments(parser):
+    parser.add_argument('-m', '--method', type=str, required=False, default='f', help='Method to use to select the threshold. Should be either "f" (for F-test), "welch" or "mannwhitneyu"')
+    parser.add_argument('-E', '--E', type=float, required=False, default=0.5, help='Parameter E')
+    parser.add_argument('-H', '--H', type=float, required=False, default=2.75, help='Parameter H')
+    parser.add_argument('-s', '--nbStep', type=int, required=False, default=100, help='Number of thresholding step interval dh')
+    parser.add_argument('-n', '--ntest', type=int, required=False, default=5000, help='Number of permutation tests')
+    parser.add_argument('-S', '--save', type=int, required=False, default=1, help='Save plot (1) or not (0)')
+    parser.add_argument('-c', '--correction', type=int, required=False, default=1, help='Apply correction for multiple testing or not')
+    parser.add_argument('-a', '--alpha', type=float, required=False, default=0.05, help='Alpha')
+    
+    return parser
+
+# class TFnbs():
+#     def __init__(self, method='f', dh=100, E=0.5, H=2.25):
+#         self.method = 'f'
+#         self.dh = dh
+#         self.E = E
+#         self.H = H
 
 class TFNBSParamError(RuntimeError):
     pass
-
-class TFnbs():
-    def __init__(self, method='f', dh=100, E=0.5, H=2.25):
-        self.method = 'f'
-        self.dh = dh
-        self.E = E
-        self.H = H
 
 def f_test(x_, y_):
     f = np.var(x_, ddof=1)/np.var(y_, ddof=1)
@@ -169,209 +189,41 @@ def permutation_test(x_, y_, mat_obs, alpha, method='f', ntest=1000, E=0.5, H=3)
 if __name__ == '__main__':
     with open('../manage_data/connection_analysis.pickle', 'rb') as f:
         x, y = pickle.load(f)
-    ###
-    method='f'
-    dh=100
-    E=0.5
-    H=2.75
-    ntest=5000
-    ###
-    raw_stats = raw_statistics(x, y, method)
-    thresholds = range_of_thresholds(raw_stats, dh)
-    tfnbs_matrix = tfnbs(raw_stats, thresholds, E, H)
-    t_max, pval_corrected = permutation_test(x, y, tfnbs_matrix, method=method, alpha=0.05, ntest=ntest, E=E, H=H)
+    parser = create_arg_parser()
+    add_arguments(parser)
+    args = parser.parse_args()
     
-#%% iterations over parameters E, H
-tfnbs_matrix_list = []
-tfnbs_matrix_stats_list = []
-pval_corrected_list = []
-test=[]
-E_list = [0.5, 0.75]
-H_list = np.arange(2.25, 3.55, 0.05)
-for E in E_list:
-    for H in H_list:
-        if E == 0.5:
-            if H > 3:
-                continue
-        if E == 0.75: 
-            if H < 2.95:
-                continue
-        print("H = {:,.2f}".format(H))
-        test.append((E,H))
-        tfnbs_matrix = tfnbs(raw_stats, thresholds, E, H)
-        t_max, pval_corrected = permutation_test(x, y, tfnbs_matrix, method=method, alpha=0.05, ntest=ntest, E=E, H=H)
+    raw_stats = raw_statistics(x, y, args.method)
+    thresholds = range_of_thresholds(raw_stats, args.nbStep)
+    tfnbs_matrix = tfnbs(raw_stats, thresholds, args.E, args.H)
+    t_max, pval_corrected = permutation_test(x, y, tfnbs_matrix, method=args.method, alpha=args.alpha, ntest=args.ntest, E=args.E, H=args.H)
+    
+    tfnbs_max_stats =  np.zeros((80, 80))
+    tfnbs_max_stats[tfnbs_matrix > t_max] = 1
+
+    if args.correction:
+        plt.imshow(tfnbs_max_stats, cmap='gray')
+        plt.grid(color='w')
+        plt.xlabel('ROIs')
+        plt.ylabel('ROIs')
+        plt.xticks(np.arange(0, 81, 10))
+        plt.yticks(np.arange(0, 81, 10))
+        plt.title('TFNBS - {} test - E={} - H={} - \nalpha={} - n_permut={}'.format(args.method, args.E, args.H, args.alpha, args.ntest))
+        if args.save:
+            plt.savefig('../tfnbs_' + 'H=' + str(args.H) + '_' + str(args.ntest) + '.png')
+        plt.show()
         
-        tfnbs_matrix_list.append(tfnbs_matrix)
-        tfnbs_max_stats =  np.zeros((80, 80))# copy.deepcopy(tfnbs_matrix)
-        tfnbs_max_stats[tfnbs_matrix > t_max] = 1
-        tfnbs_matrix_stats_list.append(tfnbs_max_stats)
-        pval_corrected_list.append(pval_corrected)
-
-#%% E=0.5
-# https://www.delftstack.com/fr/howto/matplotlib/how-to-display-multiple-images-in-one-figure-correctly-in-matplotlib/ 
-width=20
-height=20
-rows = 3
-cols = 5
-         
-figure, axes = plt.subplots(nrows=rows, ncols=cols, figsize=(width, height))
-plt.subplots_adjust(hspace=-0.7)
-figure.suptitle("TFNBS", fontsize=20, y=0.85)
-
-for cnt, b in enumerate(axes.flat):
-    b.imshow(tfnbs_matrix_stats_list[cnt])
-    b.set_title("H = {:,.2f}".format(H_list[cnt]))
-    
-figure.tight_layout()
-plt.show()
-
-#%% E=0.75
-width=20
-height=20
-rows = 2
-cols = 5
-         
-figure, axes = plt.subplots(nrows=rows, ncols=cols, figsize=(width, height))
-plt.subplots_adjust(hspace=-0.7)
-figure.suptitle("TFNBS", fontsize=20, y=0.85)
-
-for cnt, b in enumerate(axes.flat):
-    b.imshow(tfnbs_matrix_stats_list[16+cnt])
-    b.set_title("H = {:,.2f}".format(H_list[16+cnt]))
-    
-figure.tight_layout()
-plt.show()
-
-#%%
-# for i in range(dh):
-#     plt.imshow(tfnbs_matrix[:,:,i])
-#     plt.show()
-
-#%%
-# def comp(matrix):
-#     n=len(matrix)
-#     connected_comp = np.zeros((n, n))
-    
-#     ixes = np.where(np.triu(np.ones((n, n)), 1))
-#     ind_t, = np.where(matrix[np.triu_indices(n, 1)] > 0)
-#     print(ind_t)
-#     # suprathreshold adjacency matrix
-#     connected_comp[(ixes[0][ind_t], ixes[1][ind_t])] = 1
-#     connected_comp = connected_comp + connected_comp.T
-    
-#     plt.imshow(connected_comp)
-    
-#     a, sz = clustering.get_components(connected_comp)
-    
-#     # replace matrix element value by each component size
-#     # convert size from nodes to number of edges
-#     # only consider components comprising more than one node (e.g. a/l 1 edge)
-#     ind_sz, = np.where(sz > 1)
-#     ind_sz += 1
-#     nr_components = np.size(ind_sz)
-#     sz_links = np.zeros((nr_components,))
-#     for i in range(nr_components):
-#         nodes, = np.where(ind_sz[i] == a)
-#         sz_links[i] = np.sum(connected_comp[np.ix_(nodes, nodes)]) / 2
-#         connected_comp[np.ix_(nodes, nodes)] *= (i + 2)
-    
-#     # subtract 1 to delete any edges not comprising a component
-#     connected_comp[np.where(connected_comp)] -= 1
-    
-#     return connected_comp
-
-# test=comp(tfnbs_max_stats)
-
-# def comp(matrix):
-#     n=len(matrix)
-#     copy_matrix = copy.deepcopy(matrix)
-#     unique = list(np.unique(copy_matrix))
-#     for ind, value in enumerate(unique):
-#         for i in range(n):
-#             for j in range(n):
-#                 if copy_matrix[i, j] == value:
-#                     copy_matrix[i, j] = ind
-                    
-#     return copy_matrix
-
-# test=comp(tfnbs_max_stats)
-#%% corrected
-import copy 
-# import matplotlib as mpl
-
-tfnbs_max_stats =  np.zeros((80, 80))# copy.deepcopy(tfnbs_matrix)
-tfnbs_max_stats[tfnbs_matrix > t_max] = 1
-
-# fig, ax = plt.subplots()
-# cmap = mpl.cm.get_cmap('tab20', len(np.unique(test)))
-# im = plt.imshow(test, cmap=cmap, vmin=0, vmax=len(np.unique(test)), aspect=1, interpolation="none")
-# fig.colorbar(im, ticks=range(len(np.unique(test))), orientation="vertical", fraction=0.05, pad=0.04)
-
-plt.imshow(tfnbs_max_stats, cmap='gray')
-plt.xlabel('ROIs')
-plt.ylabel('ROIs')
-plt.xticks(np.arange(0, 80, 10))
-plt.yticks(np.arange(0, 80, 10))
-alpha=0.05
-plt.title('TFNBS - {} test - E={} - H={} - \nalpha={} - n_permut={}'.format(method, E, H, alpha, ntest))
-plt.savefig('graph_pictures/tfnbs/E=0.5/tfnbs_' + 'H=' + str(H) + '_' + str(ntest) + '.pdf')
-
-#%% plot connectome
-from nilearn import plotting
-
-def apply_threshold(input_, atlas):
-    '''
-    Set values which are lesser than threshold to 0.
-
-    Parameters
-    ----------
-    input_ : Nx1 or NxN np.ndarray
-        p values or squared matrix
-    threshold : float
-
-    Returns
-    -------
-    dictionary_copy : NxN np.ndarray
-        copy of the matrix where the threshold was applied
-
-    '''
-    atlas_copy = copy.deepcopy(atlas)
-    
-    if len(input_.shape) == 2: # matrix NxN  
-        indices_set_to_zero = []
-        indices_set_to_zero.append([index for index in range(len(input_)) if (
-            np.unique(input_[:, index] == 0)[0])]
-            )
-        atlas_copy[indices_set_to_zero, :] = 0
-    
-        return atlas_copy
-    
-atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
-
-fig = plt.figure(figsize=(6, 2.75))
-
-atlas_threshold = apply_threshold(tfnbs_max_stats, atlas_region_coords)
-disp = plotting.plot_connectome(tfnbs_max_stats, 
-                                atlas_threshold,
-                                figure=fig)
-
-# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=600)
-plotting.show()
-
-#%% uncorrected
-alpha=0.05
-pval_corrected_alpha = copy.deepcopy(pval_corrected)
-pval_corrected_alpha[pval_corrected_alpha > 0.05] = 1
-pval_corrected_alpha[pval_corrected_alpha == 0] = 1
-np.fill_diagonal(pval_corrected_alpha, 1)
-# dirty
-pval_corrected_alpha_inverse = np.nan_to_num(1 - pval_corrected_alpha)
-plt.imshow(pval_corrected_alpha_inverse, cmap='gray')
-plt.xlabel('ROIs')
-plt.ylabel('ROIs')
-plt.title('TFNBS - {} test - E = {} - H = {} - alpha = {}'.format(method, E, H, alpha))
-#plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
-plt.show()
-
-# import seaborn as sns
-# sns.boxplot(raw_stats.flatten())
+    else:
+        pval_corrected_alpha = copy.deepcopy(pval_corrected)
+        pval_corrected_alpha[pval_corrected_alpha > args.alpha] = 1
+        pval_corrected_alpha[pval_corrected_alpha == 0] = 1
+        np.fill_diagonal(pval_corrected_alpha, 1)
+        # dirty
+        pval_corrected_alpha_inverse = np.nan_to_num(1 - pval_corrected_alpha)
+        plt.imshow(pval_corrected_alpha_inverse, cmap='gray')
+        plt.xlabel('ROIs')
+        plt.ylabel('ROIs')
+        plt.title('TFNBS uncorrected for multiple comparisons - \n {} test - E = {} - H = {} - alpha = {}'.format(args.method, args.E, args.H, args.alpha))
+        if args.save:
+            plt.savefig('../tfnbs_' + 'H=' + str(args.H) + '_' + str(args.ntest) + '.png')
+        plt.show()
