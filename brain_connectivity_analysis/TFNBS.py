@@ -172,7 +172,7 @@ def permutation_test(x_, y_, mat_obs, alpha, method='f', ntest=1000, E=0.5, H=3)
         max_stat[t] = np.max(mat_tfnbs_permut[:, :, t])
     
     # single threshold test
-    t_max = np.sort(max_stat)[c]
+    t_max = np.sort(max_stat)[::-1][c]
     print('t_max = {}'.format(t_max))
     
     # unnormalized p-value
@@ -181,7 +181,6 @@ def permutation_test(x_, y_, mat_obs, alpha, method='f', ntest=1000, E=0.5, H=3)
     print("Computing FWE-corrected edge-wise p-values...")
     for i in range(p):
         for j in range(p):
-            # a priori, the number of maximum scores greater than observed scores at [i, j]
             mat_pval[i, j] = np.sum(mat_tfnbs_permut[i, j, :] >= mat_obs[i, j]) / ntest
     
     return t_max, mat_pval
