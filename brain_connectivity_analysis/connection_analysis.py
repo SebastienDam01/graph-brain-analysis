@@ -39,10 +39,22 @@ patients_to_delete = ['lgp_081LJ',
                       'lgp_086CA',
                       'lgp_115LMR', # exclu
                       'lgp_142JO', # age is NA
-                      'lgp_168CA'] # duration disease is NA
+                      ] 
 controls_to_delete = ['S168',
                       'EMODES_003LS', # no info on excel
-                      'EMODES_004ML']
+                      'EMODES_004ML',
+                        'DEP_001SAL', # outliers
+                        'DEP_003VB',
+                        'DEP_004SC',
+                        'DEP_005AS',
+                        'DEP_006LD',
+                        'DEP_007RT',
+                        'DEP_008SR',
+                        'DEP_009OP',
+                        'DEP_010NL',
+                        'DEP_012EP',
+                      ]
+
 subjects_to_delete = patients_to_delete + controls_to_delete
 
 for subject in subjects_to_delete:
@@ -56,6 +68,9 @@ for subject in subjects_to_delete:
         
 subject_count = subject_count - len(subjects_to_delete)
 # patients_count = patients_count - len(subjects_to_delete)
+
+patients.sort()
+controls.sort()
 
 connectivity_matrices = dict([(key, val) for key, val in 
            connectivity_matrices.items() if key not in subjects_to_delete])
@@ -76,6 +91,18 @@ def nb_fiber2density(matrices, volumes):
                 mat[i, j] = 2 * mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
+
+def get_adjacency_matrix(E, dim):
+    # vcorresp = {k:i for i,k in enumerate(np.unique(E.flatten()))}
+    # A = np.zeros((nb_ROI, nb_ROI), dtype=int)
+    # for a,b in E:
+    #     if a!=b:
+    #         A[vcorresp[a],vcorresp[b]] = A[vcorresp[b], vcorresp[a]]=1
+            
+    A = np.zeros((dim, dim), dtype=int)
+    for i, j in E:
+        A[i, j] = 1
+    return A
 
 def get_parsimonious_network(matrices, ratio=0.7, ratio_fiber=0):
     """
@@ -123,6 +150,32 @@ def get_parsimonious_network(matrices, ratio=0.7, ratio_fiber=0):
                     key_cnt[key].append([i, j])
                     count+=1
     return key_cnt, matrices_copy
+
+def threshold_connections(matrices_dict, ratio=0.75):
+    matrices_copy = copy.deepcopy(matrices_dict)
+    matrices_array = np.zeros((nb_ROI, nb_ROI, subject_count))
+    i=0
+    keys = []
+    for key, mat in matrices_copy.items():
+        keys.append(key)
+        matrices_array[:, :, i] = mat
+        i+=1
+    
+    counts = (matrices_array == 0).sum(axis=2)
+    counts = counts / subject_count
+    
+    # ind_flat, = np.where(counts[np.triu_indices(80)] < 1-ratio)
+    ind = np.argwhere(counts > 1-ratio)
+    adj = get_adjacency_matrix(ind, nb_ROI)
+    # ixes = np.where(np.triu(np.ones((nb_ROI, nb_ROI)), 1))
+    
+    for _, mat in matrices_copy.items():
+        mat[adj == 1] = 0
+        
+        # mat[(ixes[0][ind_flat], ixes[1][ind_flat])] = 0
+        # mat = mat + mat.T
+        
+    return ind, matrices_copy
 
 def get_network(matrix, threshold = 0):
     """ 
@@ -192,7 +245,7 @@ def glm_models(data_):
     """
     glm_linear_age = sm.GLM.from_formula('Metric ~ Age + Gender', data_).fit()
     return np.array(data_['Metric'] - (glm_linear_age.fittedvalues - np.mean(glm_linear_age.fittedvalues)))
-
+#%%
 # Switcher class for multiple algorithms
 # https://www.davidsbatista.net/blog/2018/02/23/model_optimization/
 from sklearn.model_selection import GridSearchCV
@@ -249,11 +302,20 @@ class EstimatorSelectionHelper:
 
         return df[columns]
     
+class ParamError(RuntimeError):
+    pass
+    
 #%% Conversion from fiber numbers to density and apply connection threshold
 #for patient in connectivity_matrices.keys():
+ratio=0.7
 connectivity_matrices_wo_threshold = copy.deepcopy(connectivity_matrices)
-#count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
+connectivity_matrices_wo_threshold = nb_fiber2density(connectivity_matrices_wo_threshold, volumes_ROI)
+# count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=ratio)
+null_regions, connectivity_matrices = threshold_connections(connectivity_matrices, ratio=ratio)
+null_regions = get_adjacency_matrix(null_regions, dim=nb_ROI)
 connectivity_matrices = nb_fiber2density(connectivity_matrices, volumes_ROI)
+plt.imshow(null_regions)
+plt.title('ratio={}'.format(ratio))
 
 #%% 1. Controls' and patients' connections 
 connections_controls = np.zeros((nb_ROI, nb_ROI, controls_count))
@@ -307,14 +369,14 @@ y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
 with open('../manage_data/connection_analysis.pickle', 'wb') as f:
     pickle.dump(
         [x, 
-         y], f)
+          y], f)
     
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
     for j in range(i+1, nb_ROI): 
-        statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count], equal_var=False)
+        statistics[i,j], p_value_connection[i][j], _ = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count], equal_var=False)
 
 # copy upper triangle to lower to obtain symmetric matrix
 p_value_connection = p_value_connection + p_value_connection.T - np.diag(np.diag(p_value_connection))
@@ -329,7 +391,9 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('t-test par connexion, p < 0.001')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.title('Welch test by connections, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
 
@@ -340,7 +404,7 @@ disp = plotting.plot_connectome(p_value_connection_bounded_inverse,
                                 atlas_threshold,
                                 figure=fig)
 
-# disp.savefig('brain_connectivity_analysis/graph_pictures/' + measures_networks[i] + '_brain', dpi=600)
+#disp.savefig('../brain_connectivity_analysis/graph_pictures/welch_test_brain.png', dpi=300)
 plotting.show()
 
 #%% Heatmap 
@@ -384,7 +448,7 @@ p_value_connection_upper = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
     for j in range(i+1, nb_ROI): 
-        statistics[i,j], p_value_connection_upper[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count], equal_var=False)
+        statistics[i,j], p_value_connection_upper[i][j], _ = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, patients_count:], fitted_linear_connections_subjects[i, j, :patients_count], equal_var=False)
 
 p_vals = p_value_connection_upper.flatten()
 p_vals = np.delete(p_vals, np.where(p_vals == 0))
@@ -517,10 +581,25 @@ plt.title('Shapiro test par connexion, p < 0.05')
 #plt.savefig('graph_pictures/ttest_connections_Bonferroni.png', dpi=600)
 plt.show()
 
+#%% Histogram 
+# for i in range(3160):
+#     if len(np.unique(xymat[i, :])) != 1:
+#         mu, std = sp.stats.norm.fit(xymat[i,:])
+#         xmin, xmax = plt.xlim()
+#         absicssa = np.linspace(xmin, xmax, 50)
+#         p = sp.stats.norm.pdf(absicssa, mu, std)
+#         plt.plot(absicssa, p, 'k', linewidth=2)
+#         plt.hist(xymat[i, :], bins=50)
+#         plt.title('{}th connection'.format(i))
+#         plt.show()
+
 #%% NBS
 
 # proportional threshold, 10 values
-threshold_grid = [0.05, 0.01, 0.001, 0.0005, 0.0002, 0.0001] # for mannwhitneyu test
+# threshold_grid = [0.0005] # for mannwhitneyu test
+# threshold_grid = np.arange(0, 80, 4) # for f test
+threshold_grid = np.arange(3, 4.1, 0.2) # for quick welch test
+# threshold_grid = np.arange(0.4, 4.5, 0.45) # for welch test
 # np.arange(0.4, 4.2, 0.4) # for equal variance 
 #np.arange(0.45, 4.6, 0.45) # for inequal variance
 # np.arange(0.4, 4.5, 0.45) # for density
@@ -530,7 +609,7 @@ pval_grid, adj_grid = [], []
 
 for thresh_grid in threshold_grid:
     print(len(adj_grid))
-    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :patients_count], y=fitted_linear_connections_subjects[:, :, patients_count:], thresh=thresh_grid, method='mannwhitneyu', k=100)
+    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :patients_count], y=fitted_linear_connections_subjects[:, :, patients_count:], thresh=thresh_grid, method='welch', k=1000)
     pval_grid.append(pval)
     adj_grid.append(adj)
 
@@ -690,13 +769,42 @@ plt.title('Threshold effect for f1')
 # plt.savefig('graph_pictures/NBS_threshold_with_errorbars.png', dpi=600)
 plt.show()
 
-OPTIMAL_THRESHOLD_COUNT = 2
+
 #%%
-nbs_network = adj_grid[OPTIMAL_THRESHOLD_COUNT]
+OPTIMAL_THRESHOLD_COUNT = 2
+
+nbs_network = copy.deepcopy(adj_grid[OPTIMAL_THRESHOLD_COUNT])
+pval_network = pval_grid[OPTIMAL_THRESHOLD_COUNT]
 # Remove subnetworks where number of nodes is two 
-for i in np.unique(nbs_network):
-    if np.count_nonzero((nbs_network) == i) == 2:
-        nbs_network[nbs_network == i] = 0
+# for i in np.unique(nbs_network):
+#     if np.count_nonzero((nbs_network) == i) == 2:
+#         nbs_network[nbs_network == i] = 0
+        
+# Remove subnetworks whose p-value is lower than alpha
+def remove_subnetworks(pvals, network, alpha=0.05):
+    significant_network = copy.deepcopy(network)
+    significant_pvals = [idx +1 for idx, pval in enumerate(pvals) if pval < alpha]
+    if significant_pvals == []:
+        ParamError('No significant edges')
+        return None
+    else:
+        i=1
+        for component_nbr in significant_pvals:
+            significant_network[significant_network == component_nbr] = i
+            i+=1
+        
+        significant_network[significant_network > len(significant_pvals)] = 0
+            
+        return significant_network
+    
+# FIXME
+for i in range(nb_ROI):
+    for j in range(nb_ROI):
+        if np.count_nonzero(nbs_network[i, :]) == 1 and np.count_nonzero(nbs_network[:, j]) == 1:
+            nbs_network[i,j]=0
+            nbs_network[j,i]=0
+
+nbs_network = remove_subnetworks(pval_network, nbs_network)
 
 # set values starting from 0 and increment by 1 
 # in order to have the corresponding colors in cmap
@@ -715,7 +823,7 @@ plt.yticks(np.arange(0, 81, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-# plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.pdf')
+plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=300)
 plt.show()
 
 threshold_adj = copy.deepcopy(nbs_network)
@@ -743,13 +851,34 @@ fig = plt.figure(figsize=(6, 2.75))
 atlas_threshold = apply_threshold(nbs_network, atlas_region_coords)
 disp = plotting.plot_connectome(nbs_network, 
                                 atlas_threshold,
-                                node_size=node_size,
-                                edge_threshold=1,
-                                edge_cmap=mpl.colors.ListedColormap(['royalblue', 'dimgray', 'royalblue', 'dimgray', 'royalblue', 'dimgray']),
+                                node_size=50,
+                                # edge_threshold=1,,
+                                edge_vmin=0,
+                                edge_vmax=len(np.unique(nbs_network)),
+                                edge_cmap=cmap,
+                                # edge_cmap=mpl.colors.ListedColormap(['red', 'gray', 'yellow', 'green']),
+                                # edge_cmap=mpl.colors.ListedColormap(['royalblue', 'dimgray', 'royalblue', 'dimgray', 'royalblue', 'dimgray']),
                                 figure=fig)
 
-# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.pdf')
+disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=300)
 plotting.show()
+
+#%% Export the connections exhibiting significative differences
+signif_connections = np.argwhere(nbs_network != 0)
+dupli_rows = []
+for i in range(signif_connections.shape[0]):
+    if signif_connections[i, 0] == signif_connections[i, 1]:
+        dupli_rows.append(i)
+    for j in range(i, signif_connections.shape[0]):
+        if i!=j and j not in dupli_rows and signif_connections[i, 0] == signif_connections[j, 1] and signif_connections[i, 1] == signif_connections[j, 0]:
+            dupli_rows.append(j)
+            
+signif_connections = np.delete(signif_connections, dupli_rows, 0)
+
+X_connections = connections_subjects[signif_connections[:, 0], signif_connections[:, 1], :].T
+
+with open('../manage_data/features_connections.pickle', 'wb') as f:
+    pickle.dump(X_connections, f)
 
 #%% Heatmap modified
 significant_t_score = copy.deepcopy(statistics)
@@ -920,26 +1049,26 @@ plt.legend()
 plt.show()
 
 #%%
-thresh=4
-ind = np.where(np.triu(adj_grid[thresh] != 0))
-X = np.zeros((subject_count, len(ind[0])))
-y = np.zeros(subject_count)
+# thresh=4
+# ind = np.where(np.triu(adj_grid[thresh] != 0))
+# X = np.zeros((subject_count, len(ind[0])))
+# y = np.zeros(subject_count)
 
-for i, (key, mat) in enumerate(connectivity_matrices_wo_threshold.items()):
-    X[i, :] = mat[ind]
-    y[i] = 0 if key in controls else 1
+# for i, (key, mat) in enumerate(connectivity_matrices_wo_threshold.items()):
+#     X[i, :] = mat[ind]
+#     y[i] = 0 if key in controls else 1
 
-cv = StratifiedKFold(n_splits=10)
-for train_index, test_index in cv.split(X, y):
-    X_train, X_test = X[train_index], X[test_index]
-    y_train, y_test = y[train_index], y[test_index]
+# cv = StratifiedKFold(n_splits=10)
+# for train_index, test_index in cv.split(X, y):
+#     X_train, X_test = X[train_index], X[test_index]
+#     y_train, y_test = y[train_index], y[test_index]
     
-    cls = RandomForestClassifier()
-    cls.fit(X_train, y_train)
-    y_pred = cls.predict(X_test)
-    fpr, tpr, threshold_roc = roc_curve(y_test, y_pred, pos_label=1)
-    auc_grid[thresh].append(auc(fpr, tpr))
-    f1_score_grid[thresh].append(f1_score(y_test, y_pred))
+#     cls = RandomForestClassifier()
+#     cls.fit(X_train, y_train)
+#     y_pred = cls.predict(X_test)
+#     fpr, tpr, threshold_roc = roc_curve(y_test, y_pred, pos_label=1)
+#     auc_grid[thresh].append(auc(fpr, tpr))
+#     f1_score_grid[thresh].append(f1_score(y_test, y_pred))
 
 #%% DDT 
 x=fitted_linear_connections_subjects[:, :, patients_count:] # patients

@@ -36,15 +36,20 @@ with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
     
 nb_ROI = len(connectivity_matrices[responders[0]])
 
+responders.sort()
+non_responders.sort()
 responders_count = len(responders)
 non_responders_count = len(non_responders)
 subject_count = responders_count + non_responders_count
 
 # TEMPORARY
-subjects_to_delete = ['lgp_168CA' # duration disease is NA
+patients_to_delete = ['lgp_168CA', # duration disease is NA 
+                      'lgp_176CJ', # no medication load
+                      'lgp_177DJ',
+                      'lgp_178JB',
                       ]
 
-for subject in subjects_to_delete:
+for subject in patients_to_delete:
     if subject in responders:
         responders.remove(subject)
         responders_count -= 1
@@ -53,14 +58,18 @@ for subject in subjects_to_delete:
         non_responders.remove(subject)
         non_responders_count -= 1
         
-subject_count = subject_count - len(subjects_to_delete)
+subject_count = subject_count - len(patients_to_delete)
+rnr = responders + non_responders
+rnr.sort()
 
 connectivity_matrices = dict([(key, val) for key, val in 
-           connectivity_matrices.items() if key not in subjects_to_delete])
+           connectivity_matrices.items() if key in rnr])
 
 volumes_ROI = dict([(key, val) for key, val in 
-           volumes_ROI.items() if key not in subjects_to_delete])
+           volumes_ROI.items() if key not in patients_to_delete])
 
+medication = medication[medication.ID.isin(rnr)]
+response_df = response_df[response_df.ID.isin(rnr)]
 
 def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
     """
@@ -92,9 +101,21 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
+                mat[i, j] = 2 * mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
+
+def get_adjacency_matrix(E, dim):
+    # vcorresp = {k:i for i,k in enumerate(np.unique(E.flatten()))}
+    # A = np.zeros((nb_ROI, nb_ROI), dtype=int)
+    # for a,b in E:
+    #     if a!=b:
+    #         A[vcorresp[a],vcorresp[b]] = A[vcorresp[b], vcorresp[a]]=1
+            
+    A = np.zeros((dim, dim), dtype=int)
+    for i, j in E:
+        A[i, j] = 1
+    return A
 
 def get_parsimonious_network(matrices, ratio=0.7, ratio_fiber=0):
     """
@@ -155,6 +176,32 @@ def get_network(matrix, threshold = 0):
     G.add_weighted_edges_from([(i,j,1.0*matrix[i][j]) for i in range(0,N) for j in range(0,i) \
                                                                    if matrix[i][j] >= threshold])
     return G
+
+def threshold_connections(matrices_dict, ratio=0.75):
+    matrices_copy = copy.deepcopy(matrices_dict)
+    matrices_array = np.zeros((nb_ROI, nb_ROI, subject_count))
+    i=0
+    keys = []
+    for key, mat in matrices_copy.items():
+        keys.append(key)
+        matrices_array[:, :, i] = mat
+        i+=1
+    
+    counts = (matrices_array == 0).sum(axis=2)
+    counts = counts / subject_count
+    
+    # ind_flat, = np.where(counts[np.triu_indices(80)] < 1-ratio)
+    ind = np.argwhere(counts > 1-ratio)
+    adj = get_adjacency_matrix(ind, nb_ROI)
+    # ixes = np.where(np.triu(np.ones((nb_ROI, nb_ROI)), 1))
+    
+    for _, mat in matrices_copy.items():
+        mat[adj == 1] = 0
+        
+        # mat[(ixes[0][ind_flat], ixes[1][ind_flat])] = 0
+        # mat = mat + mat.T
+        
+    return ind, matrices_copy
 
 def filter_weights(matrix, ratio):
     """
@@ -242,6 +289,45 @@ def apply_threshold(input_, atlas, threshold=0.05/80):
         
         return matrix, atlas_copy
     
+def apply_threshold_regions(input_, atlas):
+    '''
+    Set values which are not in input_ to zero.
+
+    Parameters
+    ----------
+    input_ : dict
+        regions
+    atlas : np.array of shape (nb_ROI, 3)
+
+    Returns
+    -------
+
+
+    '''
+    atlas_copy = copy.deepcopy(atlas)
+    
+    signif_regions = [l.tolist() for l in list(input_.values())]
+    signif_regions = list(itertools.chain(*signif_regions))
+    
+    indices_set_to_zero = list(set(np.arange(0, nb_ROI)) - set(signif_regions))
+    atlas_copy[indices_set_to_zero] = 0
+    
+    matrix = np.zeros((nb_ROI, nb_ROI))
+    for index in signif_regions:
+        matrix[index][index] = 1
+    
+    return matrix, atlas_copy
+    
+def plot_fittedvalues(y_, model):
+    plt.plot(y_, label='values')
+    plt.plot(model.fittedvalues, label='fitted values')
+    plt.axvline(x=patients_count, linestyle='--', color='red', label='Patients/Controls separation')
+    plt.ylabel('Global efficiency')
+    plt.xlabel('Subject')
+    plt.legend()
+    plt.grid(False)
+    plt.show()
+    
 def plot_fittedvalues(y_, model):
     plt.plot(y_, label='values')
     plt.plot(model.fittedvalues, label='fitted values')
@@ -268,7 +354,7 @@ def glm_models(data_):
         Adjusted values for the response variable.
     """
     glm_linear = sm.GLM.from_formula('Metric ~ Age + Gender + Depression_duration', data_).fit()
-    return np.array(data['Metric'] - (glm_linear.fittedvalues - np.mean(glm_linear.fittedvalues)))
+    return np.array(data_['Metric'] - glm_linear.fittedvalues)
 
 def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
@@ -295,6 +381,8 @@ def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     """
     p = mat_obs.shape[0]
     mat_permut = np.zeros((p, ntest))
+    mat_permut_U1 = np.zeros((p, ))
+    c = int(np.floor(0.05 * ntest))
         
     # 1. randomize samples
     for t in range(ntest):
@@ -303,15 +391,25 @@ def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
         random.shuffle(concat_subset)
         subset_A, subset_B = concat_subset[:subset_size], concat_subset[subset_size:]
         
-        mat_permut[:, t], _ = sp.stats.mannwhitneyu(measures_subjects[measure][subset_A, :], measures_subjects[measure][subset_B, :])
-        
-    # 2. unnormalized p-value
+        for i in range(nb_ROI):
+            mat_permut_U1[i], _ = sp.stats.mannwhitneyu(measures_subjects[measure][subset_A, i], measures_subjects[measure][subset_B, i])
+            mat_permut_U2 = patients_count * controls_count - mat_permut_U1
+            mat_permut[:, t] = np.minimum(mat_permut_U1, mat_permut_U2)
+            # mat_permut[i, t], _, _ = sp.stats.ttest_ind(measures_subjects[measure][subset_A, i], measures_subjects[measure][subset_B, i], equal_var=False)
+            
+    max_stat = np.max(mat_permut, axis=0)
+    
+    # 2. Single threshold test
+    # t_max = np.sort(max_stat)[::-1][c]
+    t_max = np.percentile(np.sort(max_stat), 100 * (1 - 0.05))
+    
+    # 3. unnormalized p-value
     mat_pval = np.zeros((p, ))
     
     for j in range(p):
         mat_pval[j] = np.sum(mat_permut[j, :] >= mat_obs[j]) / ntest
             
-    return mat_pval
+    return t_max, mat_pval
 
 #%%
 # Network measures 
@@ -790,9 +888,14 @@ def average_neighbor_degree(matrix):
 #for patient in connectivity_matrices.keys():
 #    connectivity_matrices[patient] = filter_weights(connectivity_matrices[patient], THRESHOLD)
 #connectivity_matrices_wo_threshold = nb_fiber2density(connectivity_matrices, volumes_ROI)
+ratio=0.7
 connectivity_matrices_wo_threshold = copy.deepcopy(connectivity_matrices)
-count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=0.85)
+count_parsimonious, _ = get_parsimonious_network(connectivity_matrices, ratio=ratio)
+null_regions, connectivity_matrices = threshold_connections(connectivity_matrices, ratio=ratio)
+null_regions = get_adjacency_matrix(null_regions, nb_ROI)
 connectivity_matrices = nb_fiber2density(connectivity_matrices, volumes_ROI)
+plt.imshow(null_regions)
+plt.title('ratio = {}'.format(ratio))
 
 #%% Clinical characteristics 
         
@@ -814,7 +917,7 @@ print("non_responders - Age mean {:,.2f} and standard deviation {:,.2f}".format(
 print("Durée de dépression - Moyenne {:,.2f} et écart-type {:,.2f}".format(np.mean(depression_duration), np.std(depression_duration)))
 
 p_value_clinical = {}
-_, p_value_clinical['Age'] = sp.stats.ttest_ind(age_responders, age_non_responders, permutations=5000, equal_var=False)
+_, p_value_clinical['Age'], _ = sp.stats.ttest_ind(age_responders, age_non_responders, permutations=5000, equal_var=False)
 
 gender = gender_responders + gender_non_responders
 subjects = responders + non_responders
@@ -822,6 +925,13 @@ subjects = responders + non_responders
 df = pd.DataFrame({'Gender' : gender, 'Subject':subjects})
 contingency = pd.crosstab(df['Gender'], df['Subject'])
 _, p_value_clinical['Gender'], _, _ = sp.stats.chi2_contingency(contingency)
+
+#%% Clinical measures
+print("Patients - Medication load mean {:,.2f} and standard deviation {:,.2f}".format(np.mean(medication['Medication load']), np.std(medication['Medication load'])))
+print("Percentage of patients having used antidepressant: {:,.2f}%".format((len(medication.loc[medication['A antidepresseur'] > 0]['A antidepresseur']) / patients_count) * 100))
+print("Percentage of patients having used mood stabilizer: {:,.2f}%".format((len(medication.loc[medication['B Mood stabilizeur'] > 0]['B Mood stabilizeur']) / patients_count) * 100))
+print("Percentage of patients having used antipsychotic: {:,.2f}%".format((len(medication.loc[medication['C antipsycho'] > 0]['C antipsycho']) / patients_count) * 100))
+print("Percentage of patients having used benzodiazepine: {:,.2f}%".format((len(medication.loc[medication['D Bzd'] > 0]['D Bzd']) / patients_count) * 100))
 
 ##############################
 #%% Graph metrics analysis
@@ -962,6 +1072,8 @@ for metric in local_metrics:
     measures_subjects[metric] = np.vstack((measures_responders[metric], measures_non_responders[metric]))
 for metric in global_metrics:
     measures_subjects[metric] = np.hstack((metrics_responders[metric], metrics_non_responders[metric]))
+    
+medication_load = medication['Medication load']
 
 data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
@@ -1014,10 +1126,10 @@ for measure in local_metrics:
     for region_count in range(nb_ROI):
         _, p_value_region[measure][region_count] = sp.stats.mannwhitneyu(measures_responders[measure][:, region_count], measures_non_responders[measure][:, region_count])
 
-_, p_value_region['charac_path'] = sp.stats.ttest_ind(measures_subjects['charac_path'][:responders_count], measures_subjects['charac_path'][responders_count:], permutations=5000, equal_var=False)
-_, p_value_region['global_efficiency'] = sp.stats.ttest_ind(measures_subjects['global_efficiency'][:responders_count], measures_subjects['global_efficiency'][responders_count:], permutations=5000, equal_var=False)
-_, p_value_region['global_clust_coef'] = sp.stats.ttest_ind(measures_subjects['global_clust_coef'][:responders_count], measures_subjects['global_clust_coef'][responders_count:], permutations=5000, equal_var=False)
-_, p_value_region['global_strength'] = sp.stats.ttest_ind(measures_subjects['global_strength'][:responders_count], measures_subjects['global_strength'][responders_count:], permutations=5000, equal_var=False)
+_, p_value_region['charac_path'], _ = sp.stats.ttest_ind(measures_subjects['charac_path'][:responders_count], measures_subjects['charac_path'][responders_count:], permutations=5000, equal_var=False)
+_, p_value_region['global_efficiency'], _ = sp.stats.ttest_ind(measures_subjects['global_efficiency'][:responders_count], measures_subjects['global_efficiency'][responders_count:], permutations=5000, equal_var=False)
+_, p_value_region['global_clust_coef'], _ = sp.stats.ttest_ind(measures_subjects['global_clust_coef'][:responders_count], measures_subjects['global_clust_coef'][responders_count:], permutations=5000, equal_var=False)
+_, p_value_region['global_strength'], _ = sp.stats.ttest_ind(measures_subjects['global_strength'][:responders_count], measures_subjects['global_strength'][responders_count:], permutations=5000, equal_var=False)
 
 for measure in p_value_region.keys():
     if measure in local_metrics:
@@ -1066,14 +1178,14 @@ for measure in mean_measures_non_responders.keys():
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
             # Bonferroni correction
-            # if p_value_region[measure][region_count] < p_value:
-            #     plt.axvline(x=region_count, linestyle='--', color='red')
-            # FDR correction
-            if res_fdr_region[measure][region_count]:
+            if p_value_region[measure][region_count] < p_value:
                 plt.axvline(x=region_count, linestyle='--', color='red')
+            # FDR correction
+            # if res_fdr_region[measure][region_count]:
+            #     plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
-    plt.title(measures_networks[i] + ' - t-test' + ' - 5000 permutation tests', fontweight='bold', loc='center', fontsize=16)
+    plt.title(measures_networks[i] + ' - Welch test' + ' - 5000 permutation tests', fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
     # plt.savefig('graph_pictures/' + measures_networks[i] + '.png', dpi=400)
@@ -1091,25 +1203,131 @@ for measure in mean_measures_non_responders.keys():
     i+=1
 
 #%% Mann-Whitney U test
+method='mannwhitneyu'
+U1 = {}
+U2 = {}
+U = {}
+p_values_mat = {}
+t_max_measures = {}
+n_permut = 500
+print('Computing Mann-Whitney test ...')
+for measure in local_metrics:
+    print(measure)
+    # stats_measures[measure] = np.zeros((nb_ROI,))
+    p_values_mat[measure] = np.zeros((nb_ROI,))
+    subset_responders = [random.randint(0, responders_count-1) for _ in range(patients_count)] # shuffle index, actually not needed
+    subset_non_responders = [random.randint(responders_count, subject_count-1) for _ in range(non_responders_count)] # shuffle index, actually not needed
+    
+    U1[measure] = np.zeros((nb_ROI, ))
+    U[measure] = np.zeros((nb_ROI, ))
+    for i in range(nb_ROI):
+        U1[measure][i], _ = sp.stats.mannwhitneyu(measures_responders[measure][:, i], measures_non_responders[measure][:, i])
+        U2[measure] = responders_count * non_responders_count - U1[measure]
+        U[measure] = np.minimum(U1[measure], U2[measure])
+        # U[measure][i], _, _ = sp.stats.ttest_ind(measures_patients[measure][:, i], measures_controls[measure][:, i], equal_var=False)
+
+        # Need to change in 'permutation_test' the method if the latest was changed !!!
+    t_max_measures[measure], p_values_mat[measure] = permutation_test(subset_non_responders,
+                                    subset_responders,
+                                    U[measure],
+                                    measure,
+                                    n_permut)
+    
+#%% t_max with scipy permutations for WELCH/STUDENT's test
+method='welch'
+t_permutation = {}
+t_max_measures = {}
 stats_measures = {}
 p_values_mat = {}
-n_permut = 5000
-print('Computing Mann-Whitney U test ...')
+n_permut = 100000
+alpha=0.05
 for measure in local_metrics:
     print(measure)
     stats_measures[measure] = np.zeros((nb_ROI,))
     p_values_mat[measure] = np.zeros((nb_ROI,))
-    subset_responders = [random.randint(0, responders_count-1) for _ in range(responders_count)] # shuffle index, actually not needed
-    subset_non_responders = [random.randint(responders_count, subject_count-1) for _ in range(non_responders_count)] # shuffle index, actually not needed
-    
+    t_permutation[measure] = np.zeros((n_permut, nb_ROI))
     for region_count in range(nb_ROI):
-        stats_measures[measure][region_count], _ = sp.stats.mannwhitneyu(measures_responders[measure][:, region_count], measures_non_responders[measure][:, region_count])
+        stats_measures[measure][region_count], p_values_mat[measure][region_count], t_permutation[measure][:, region_count] = sp.stats.ttest_ind(measures_responders[measure][:, region_count], measures_non_responders[measure][:, region_count], permutations=n_permut, equal_var=False)
+        
+    c = int(np.floor(alpha * n_permut))
+    t_max_measures[measure] = np.sort(np.max(t_permutation[measure], axis=1))
     
-    p_values_mat[measure] = permutation_test(subset_non_responders,
-                                    subset_responders,
-                                    stats_measures[measure],
-                                    measure,
-                                    n_permut)
+#%% 
+signif_regions_max_stat = {}
+for measure in local_metrics:
+    if method=='mannwhitneyu':
+        signif_regions_max_stat[measure] = np.array(np.where(U[measure] > t_max_measures[measure]), dtype=int).T.ravel()
+    else:
+        signif_regions_max_stat[measure] = np.array(np.where(stats_measures[measure] > t_max_measures[measure][::-1][c]), dtype=int).T.ravel()
+signif_regions_max_stat.pop('deg')
+# signif_regions_max_stat.pop('local_efficiency')
+# signif_regions_max_stat.pop('clust_coef')
+    
+#%% https://github.com/nilearn/nilearn/issues/1945
+from matplotlib import cm
+from matplotlib.lines import Line2D
+import itertools
+
+ser = pd.Series(dtype=str)
+for measure in signif_regions_max_stat.keys():
+    for region in signif_regions_max_stat[measure]:
+        ser1 = pd.Series(data=measure, index=[region])
+        ser=pd.concat([ser, ser1])
+      
+signif_regions = [l.tolist() for l in list(signif_regions_max_stat.values())]
+signif_regions = list(itertools.chain(*signif_regions))
+no_regions = list(set(np.arange(0, nb_ROI)) - set(signif_regions))
+for region in no_regions:
+    ser2 = pd.Series(data='nan', index=[region])
+    ser=pd.concat([ser, ser2])
+        
+ser.sort_index(inplace=True)
+ser=ser[~ser.index.duplicated(keep='first')]
+
+rsn = np.unique(ser)
+color_dict = {}
+cmap = cm.get_cmap('tab20', len(rsn))
+for rsn, c in zip(rsn, cmap.colors.tolist()):
+    color_dict[rsn] = tuple(c)
+
+node_color = []
+for nw in ser:
+    if nw == 'nan':
+        node_color.append(tuple((1,1,1,1)))
+    else:
+        node_color.append(color_dict[nw])
+
+
+fig, ax = plt.subplots()
+
+plt.figure(figsize=(8, 2.75))
+
+matrix_map, atlas_threshold = apply_threshold_regions(signif_regions_max_stat, atlas_region_coords)
+# remove dot at the center
+atlas_threshold[atlas_threshold==0] = 'nan'
+
+# No significative nodes
+if len(np.unique(matrix_map)) == 1 and len(np.unique(atlas_threshold)) == 1:
+    matrix_map, atlas_threshold = np.zeros((0, 0)), np.zeros((0, 3))
+    
+disp = plotting.plot_connectome(matrix_map, 
+                                atlas_threshold,
+                                figure=fig,
+                                node_color=node_color)
+
+
+color_dict.pop('nan')
+legend_elements = []
+for k,v in color_dict.items():
+    legend_elements.append(Line2D([0], [0], marker='o', color=v, label=k,
+                          markerfacecolor=v, markersize=5, lw=0))
+
+ax.axis("off")
+ax.legend(handles=legend_elements, loc=(1.2, 0.3))
+disp.title('Regions exhibiting significant differences by \nmaximal statistic permutation tests \n(n=50000, alpha=0.05)')
+
+# fig.savefig('graph_pictures/mannwhitneyu/max_stats_brain.png', dpi=300, bbox_inches='tight')
+plotting.show()
     
 #%%
 def permutation_test_global(list_A, list_B, mat_obs, measure, ntest=1000):
@@ -1192,14 +1410,14 @@ for measure in mean_measures_non_responders.keys():
     for region_count in range(nb_ROI):
         if measure != 'charac_path' and measure != 'global_efficiency':
             # Bonferroni correction
-            # if p_values_mat[measure][region_count] < p_value:
-            #     plt.axvline(x=region_count, linestyle='--', color='red')
-            # FDR correction
-            if res_fdr_region[measure][region_count]:
+            if p_values_mat[measure][region_count] < p_value:
                 plt.axvline(x=region_count, linestyle='--', color='red')
+            # FDR correction
+            # if res_fdr_region[measure][region_count]:
+            #     plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
-    plt.title(measures_networks[i] + ' - Mann-Whitney U test - ' + str(n_permut) + ' permutation tests' + ' - p-value=' + str(pvalue), fontweight='bold', loc='center', fontsize=16)
+    plt.title(measures_networks[i] + ' - Welch test - ' + str(n_permut) + ' permutation tests' + ' - p-value=' + str(pvalue), fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
     # plt.savefig('graph_pictures/mann-whitney/response/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
@@ -1357,6 +1575,7 @@ data = pd.DataFrame({
     "Intercept": np.ones(subject_count),
     "Age": age - np.mean(age, axis=0),
     "Gender": gender,
+    "Depression_duration": depression_duration,
     "Metric": np.zeros(subject_count)
     })
 #%%
@@ -1366,13 +1585,21 @@ for i in tqdm(range(nb_ROI)):
         if np.sum(connections_subjects[i, j, :]) != 0:
             data["Metric"] = connections_subjects[i, j, :]
             fitted_linear_connections_subjects[i, j, :] = glm_models(data)
+            
+#%% pickle connections
+x=fitted_linear_connections_subjects[:, :, responders_count:] # responders
+y=fitted_linear_connections_subjects[:, :, :responders_count] # non_responders
+with open('../manage_data/responders_analysis.pickle', 'wb') as f:
+    pickle.dump(
+        [x, 
+          y], f)
 
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
 statistics = np.zeros((nb_ROI, nb_ROI))
 for i in tqdm(range(nb_ROI)):
     for j in range(i+1, nb_ROI): 
-        statistics[i,j], p_value_connection[i][j] = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, responders_count:], fitted_linear_connections_subjects[i, j, :responders_count], equal_var=False)
+        statistics[i,j], p_value_connection[i][j], _ = sp.stats.ttest_ind(fitted_linear_connections_subjects[i, j, responders_count:], fitted_linear_connections_subjects[i, j, :responders_count], equal_var=False)
 
 # copy upper triangle to lower to obtain symmetric matrix
 p_value_connection = p_value_connection + p_value_connection.T - np.diag(np.diag(p_value_connection))
@@ -1387,13 +1614,17 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('t-test par connexion, p < 0.01')
+plt.xticks(np.arange(0, 81, 10))
+plt.yticks(np.arange(0, 81, 10))
+plt.title('Welch test par connexion, p < 0.01')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
 
 fig = plt.figure(figsize=(6, 2.75))
 
 atlas_threshold = apply_threshold(p_value_connection_bounded_inverse, atlas_region_coords)
+# remove dot at the center
+atlas_threshold[atlas_threshold==0] = 'nan'
 disp = plotting.plot_connectome(p_value_connection_bounded_inverse, 
                                 atlas_threshold,
                                 figure=fig)
@@ -1558,7 +1789,8 @@ plt.show()
 #%% NBS
 
 # proportional threshold, 10 values
-threshold_grid = [0.05, 0.01, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00004, 0.00003] # for mannwhitneyu test
+# threshold_grid = [0.05, 0.01, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00004, 0.00003] # for mannwhitneyu test
+threshold_grid = np.arange(2, 3.1, 0.2) # for quick welch test
 # np.arange(0.4, 4.2, 0.4) # for equal variance 
 #np.arange(0.45, 4.6, 0.45) # for inequal variance
 # np.arange(0.4, 4.5, 0.45) # for density
@@ -1568,7 +1800,7 @@ pval_grid, adj_grid = [], []
 
 for thresh_grid in threshold_grid:
     print(len(adj_grid))
-    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :responders_count], y=fitted_linear_connections_subjects[:, :, responders_count:], thresh=thresh_grid, method='mannwhitneyu', k=1000)
+    pval, adj, null_K = bct.nbs_bct(x=fitted_linear_connections_subjects[:, :, :responders_count], y=fitted_linear_connections_subjects[:, :, responders_count:], thresh=thresh_grid, method='welch', k=1000)
     pval_grid.append(pval)
     adj_grid.append(adj)
 
@@ -1583,7 +1815,7 @@ for i in range(len(adj_grid)):
     # plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[i]) + 'wc.png', dpi=600)
     plt.show()
 
-OPTIMAL_THRESHOLD_COUNT = 8
+OPTIMAL_THRESHOLD_COUNT = 1
 #%%
 nbs_network = adj_grid[OPTIMAL_THRESHOLD_COUNT]
 # Remove subnetworks where number of nodes is two 
@@ -1666,6 +1898,7 @@ plt.title('Heatmap of t-score, NBS corrected')
 plt.show()
 
 #%% DDT 
+U = 1000
 x=fitted_linear_connections_subjects[:, :, responders_count:] # patients
 y=fitted_linear_connections_subjects[:, :, :responders_count] # controls
 n = len(x)
@@ -1673,12 +1906,11 @@ n = len(x)
 # 1. Difference network 
 _, u_pvalue = sp.stats.mannwhitneyu(x, y, axis=-1)
 D = 1 - u_pvalue
-# np.fill_diagonal(D, 0)
-#%% 
+np.fill_diagonal(D, 0)
+
 # 2. First and second moments
-U = 2 # arg
 D_bar = sp.special.logit(D)
-# D_bar[np.diag_indices(n)[0], np.diag_indices(n)[1]] = np.diag(D) # to verify
+# D_bar[np.diag_indices(n)[0], np.diag_indices(n)[1]] = np.diag(D) # to check
 
 ## Convert -inf and +inf to random values
 idxinf = np.argwhere(D_bar <= -12)
@@ -1700,14 +1932,15 @@ C = np.zeros((n, n, U))
 null = np.zeros((n, n ,U))
 
 for i in range(U):
-    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, U))
+    l = μ + np.sqrt(σsq) * np.random.normal(size=(n, m))
     C[:, :, i] = l @ l.T
     null[:, :, i] = sp.special.expit(C[:, :, i])
     
 for i in range(U):
-    print("mean of off-diagonal elements: {}, expected value: {}".format(np.mean(C[:, :, i][np.triu_indices(n, 1)]), e_bar))
-    print("variance of off-diagonal elements: {}, expected value: {}".format(np.var(C[:, :, i][np.triu_indices(n, 1)]), v_bar))
-    print("mean of diagonal elements: {}, expected value: {} \n".format(np.mean(np.diag(C[:, :, i])), e))
+    print("Number {} network \n-----------------".format(i+1))   
+    print("mean of off-diagonal elements: {:,.2f}, expected value: {:,.2f}".format(np.mean(C[:, :, i][np.triu_indices(n, 1)]), e_bar))
+    print("variance of off-diagonal elements: {:,.2f}, expected value: {:,.2f}".format(np.var(C[:, :, i][np.triu_indices(n, 1)]), v_bar))
+    print("mean of diagonal elements: {:,.2f}, expected value: {:,.2f} \n".format(np.mean(np.diag(C[:, :, i])), e))
 
 # 4. Adaptive threshold  
 
