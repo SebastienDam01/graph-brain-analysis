@@ -37,22 +37,22 @@ nb_ROI = len(connectivity_matrices[patients[0]])
 patients_to_delete = ['lgp_081LJ',
                       'lgp_096MS',
                       'lgp_086CA',
-                      'lgp_115LMR', # exclu
-                      'lgp_142JO', # age is NA
+                       'lgp_115LMR', # exclu
+                       'lgp_142JO', # age is NA
                       ] 
 controls_to_delete = ['S168',
-                      'EMODES_003LS', # no info on excel
-                      'EMODES_004ML',
-                        'DEP_001SAL', # outliers
-                        'DEP_003VB',
-                        'DEP_004SC',
-                        'DEP_005AS',
-                        'DEP_006LD',
-                        'DEP_007RT',
-                        'DEP_008SR',
-                        'DEP_009OP',
-                        'DEP_010NL',
-                        'DEP_012EP',
+                     'EMODES_003LS', # no info on excel
+                     'EMODES_004ML',
+                     'DEP_001SAL', # outliers
+                     'DEP_003VB',
+                     'DEP_004SC',
+                     'DEP_005AS',
+                     'DEP_006LD',
+                     'DEP_007RT',
+                     'DEP_008SR',
+                     'DEP_009OP',
+                     'DEP_010NL',
+                     'DEP_012EP',
                       ]
 
 subjects_to_delete = patients_to_delete + controls_to_delete
@@ -67,7 +67,6 @@ for subject in subjects_to_delete:
         controls_count -= 1
         
 subject_count = subject_count - len(subjects_to_delete)
-# patients_count = patients_count - len(subjects_to_delete)
 
 patients.sort()
 controls.sort()
@@ -309,7 +308,7 @@ class ParamError(RuntimeError):
 #for patient in connectivity_matrices.keys():
 ratio=0.7
 connectivity_matrices_wo_threshold = copy.deepcopy(connectivity_matrices)
-connectivity_matrices_wo_threshold = nb_fiber2density(connectivity_matrices_wo_threshold, volumes_ROI)
+# connectivity_matrices_wo_threshold = nb_fiber2density(connectivity_matrices_wo_threshold, volumes_ROI)
 # count_parsimonious, connectivity_matrices = get_parsimonious_network(connectivity_matrices, ratio=ratio)
 null_regions, connectivity_matrices = threshold_connections(connectivity_matrices, ratio=ratio)
 null_regions = get_adjacency_matrix(null_regions, dim=nb_ROI)
@@ -366,10 +365,10 @@ for i in tqdm(range(nb_ROI)):
 #%% pickle connections
 x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
 y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
-with open('../manage_data/connection_analysis.pickle', 'wb') as f:
-    pickle.dump(
-        [x, 
-          y], f)
+# with open('../manage_data/connection_analysis.pickle', 'wb') as f:
+#     pickle.dump(
+#         [x, 
+#           y], f)
     
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
@@ -391,8 +390,8 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+# plt.xticks(np.arange(0, nb_ROI + 1, 10))
+# plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.title('Welch test by connections, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
@@ -415,8 +414,8 @@ significant_t_score = copy.deepcopy(statistics)
 significant_t_score[p_value_connection_bounded_inverse == 0] = 0
 plt.imshow(significant_t_score, cmap='bwr')
 plt.colorbar(label="t-statistic")
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+plt.xticks(np.arange(0, nb_ROI + 1, 10))
+plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('Heatmap with density of fibers')
@@ -616,8 +615,8 @@ for thresh_grid in threshold_grid:
 #%%
 for i in range(len(adj_grid)):
     plt.imshow(adj_grid[i])
-    plt.xticks(np.arange(0, 81, 10))
-    plt.yticks(np.arange(0, 81, 10))
+    plt.xticks(np.arange(0, nb_ROI + 1, 10))
+    plt.yticks(np.arange(0, nb_ROI + 1, 10))
     plt.xlabel('ROIs')
     plt.ylabel('ROIs')
     plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[i]))
@@ -692,7 +691,7 @@ for thresh in tqdm(range(nb_grid)):
             
 #%% Plot
 # https://stackoverflow.com/questions/71794028/how-can-i-adjust-the-hue-of-a-seaborn-lineplot-without-having-it-connect-to-the
-# frame : https://stackoverflow.com/questions/34318110/in-pythons-seaborn-is-there-any-way-to-do-the-opposite-of-despine
+# frame : https://stackoverflow.com/questions/3431nb_ROI + 110/in-pythons-seaborn-is-there-any-way-to-do-the-opposite-of-despine
 best_results_auc = pd.DataFrame(index=range(nb_grid), columns=range(3))
 best_results_auc.columns = ['Estimator', 'AUC', 'Std']
 for i in range(nb_grid):
@@ -781,7 +780,7 @@ pval_network = pval_grid[OPTIMAL_THRESHOLD_COUNT]
 #         nbs_network[nbs_network == i] = 0
         
 # Remove subnetworks whose p-value is lower than alpha
-def remove_subnetworks(pvals, network, alpha=0.05):
+def remove_subnetworks(pvals, network, alpha=0.1):
     significant_network = copy.deepcopy(network)
     significant_pvals = [idx +1 for idx, pval in enumerate(pvals) if pval < alpha]
     if significant_pvals == []:
@@ -818,17 +817,17 @@ fig, ax = plt.subplots()
 cmap = mpl.cm.get_cmap('Accent', len(np.unique(nbs_network)))
 im = plt.imshow(nbs_network, cmap=cmap, vmin=0, vmax=len(np.unique(nbs_network)), aspect=1, interpolation="none")
 fig.colorbar(im, ticks=range(len(np.unique(nbs_network))), orientation="vertical", fraction=0.05, pad=0.04)
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+plt.xticks(np.arange(0, nb_ROI + 1, 10))
+plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=300)
+# plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.pdf')
 plt.show()
 
 threshold_adj = copy.deepcopy(nbs_network)
 threshold_adj[threshold_adj != 0] = 1 
-degree = threshold_adj @ np.ones(80)
+degree = threshold_adj @ np.ones(nb_ROI)
 node_size = degree * 50
 
 # # True degrees
@@ -860,7 +859,7 @@ disp = plotting.plot_connectome(nbs_network,
                                 # edge_cmap=mpl.colors.ListedColormap(['royalblue', 'dimgray', 'royalblue', 'dimgray', 'royalblue', 'dimgray']),
                                 figure=fig)
 
-disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=300)
+# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.pdf')
 plotting.show()
 
 #%% Export the connections exhibiting significative differences
@@ -882,13 +881,13 @@ with open('../manage_data/features_connections.pickle', 'wb') as f:
 
 #%% Heatmap modified
 significant_t_score = copy.deepcopy(statistics)
-significant_t_score[adj_grid[OPTIMAL_THRESHOLD_COUNT] == 0] = 0
+significant_t_score[nbs_network == 0] = 0
 significant_t_score = significant_t_score + significant_t_score.T - np.diag(np.diag(significant_t_score))
 
 plt.imshow(significant_t_score, cmap='bwr')
 plt.colorbar(label="t-statistic")
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+plt.xticks(np.arange(0, nb_ROI + 1, 10))
+plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('Heatmap of t-score, NBS corrected')
@@ -952,8 +951,8 @@ adj = adj + adj.T
 plt.imshow(adj, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+plt.xticks(np.arange(0, nb_ROI + 1, 10))
+plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.title('t-test par connexion, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
@@ -975,8 +974,8 @@ p_value_connection_bounded_inverse = np.nan_to_num(1 - p_value_connection_bounde
 plt.imshow(p_value_connection_bounded_inverse, cmap='gray')
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+plt.xticks(np.arange(0, nb_ROI + 1, 10))
+plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.title('t-test par connexion, p < 0.001')
 #plt.savefig('brain_connectivity_analysis/graph_pictures_on_good_matrices/ttest_connections.png', dpi=600)
 plt.show()
@@ -986,8 +985,8 @@ significant_t_score = copy.deepcopy(stats)
 significant_t_score[p_value_connection_bounded_inverse == 0] = 0
 plt.imshow(significant_t_score, cmap='bwr')
 plt.colorbar(label="t-statistic")
-plt.xticks(np.arange(0, 81, 10))
-plt.yticks(np.arange(0, 81, 10))
+plt.xticks(np.arange(0, nb_ROI + 1, 10))
+plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 # plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)

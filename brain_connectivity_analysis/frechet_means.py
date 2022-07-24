@@ -18,25 +18,39 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 sns.set()
 
-os.chdir('..')
-
 # Load variables from data_preprocessed.pickle
-with open('manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict = pickle.load(f)
+with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders, response_df, medication = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
-with open('manage_data/volumes_preprocessed.pickle', 'rb') as f:
+with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
     volumes_ROI = pickle.load(f)
 
 nb_ROI = len(connectivity_matrices[patients[0]])
 
 # TEMPORARY
-subjects_to_delete = ['lgp_081LJ',
+patients_to_delete = ['lgp_081LJ',
                       'lgp_096MS',
                       'lgp_086CA',
-                      'S168',
-                      'EMODES_003LS', # no info on excel
-                      'EMODES_004ML']
+                       'lgp_115LMR', # exclu
+                       'lgp_142JO', # age is NA
+                      ] 
+controls_to_delete = ['S168',
+                     'EMODES_003LS', # no info on excel
+                     'EMODES_004ML',
+                     'DEP_001SAL', # outliers
+                     'DEP_003VB',
+                     'DEP_004SC',
+                     'DEP_005AS',
+                     'DEP_006LD',
+                     'DEP_007RT',
+                     'DEP_008SR',
+                     'DEP_009OP',
+                     'DEP_010NL',
+                     'DEP_012EP',
+                      ]
+
+subjects_to_delete = patients_to_delete + controls_to_delete
 
 for subject in subjects_to_delete:
     if subject in patients:
@@ -61,7 +75,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 0] + volumes[subject][j, 0])
+                mat[i, j] = 2 * mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
 
@@ -212,8 +226,8 @@ for subject, d in connectivity_matrices.items():
 
 F = np.zeros((nb_ROI, nb_ROI))
 for _ in tqdm(range(100)):
-    subset_controls = random.choices(controls, k=5) # hardcoded number of controls taken for each test
-    subset_patients = random.choices(patients, k=12) # hardcoded number of patients taken for each test
+    subset_controls = random.choices(controls, k=controls_count) # hardcoded number of controls taken for each test
+    subset_patients = random.choices(patients, k=patients_count) # hardcoded number of patients taken for each test
 
     frechet_mean_controls = frechet_mean_closed_form(laplacian_matrices, subset_controls)
     frechet_mean_patients = frechet_mean_closed_form(laplacian_matrices, subset_patients)
@@ -222,7 +236,7 @@ for _ in tqdm(range(100)):
     p_values_mat = spd_permutation_test(subset_controls,
                                         subset_patients,
                                         frechet_mean_obs,
-                                        100)
+                                        1000)
     
     for i in range(nb_ROI):
         for j in range(nb_ROI):

@@ -48,17 +48,19 @@ patients_to_delete = ['lgp_081LJ',
 controls_to_delete = ['S168',
                       'EMODES_003LS', # no info on excel
                       'EMODES_004ML',
-                       'DEP_001SAL', # outliers
-                       'DEP_003VB',
-                       'DEP_004SC',
-                       'DEP_005AS',
-                       'DEP_006LD',
-                       'DEP_007RT',
-                       'DEP_008SR',
-                       'DEP_009OP',
-                       'DEP_010NL',
-                       'DEP_012EP',
+                        'DEP_001SAL', # outliers
+                        'DEP_003VB',
+                        'DEP_004SC',
+                        'DEP_005AS',
+                        'DEP_006LD',
+                        'DEP_007RT',
+                        'DEP_008SR',
+                        'DEP_009OP',
+                        'DEP_010NL',
+                        'DEP_012EP',
                       ]
+
+subjects_to_delete = []
 subjects_to_delete = patients_to_delete + controls_to_delete
 
 for subject in subjects_to_delete:
@@ -72,10 +74,10 @@ for subject in subjects_to_delete:
 subject_count = subject_count - len(subjects_to_delete)
 
 connectivity_matrices = dict([(key, val) for key, val in 
-           connectivity_matrices.items() if key not in subjects_to_delete])
+            connectivity_matrices.items() if key not in subjects_to_delete])
 
 volumes_ROI = dict([(key, val) for key, val in 
-           volumes_ROI.items() if key not in subjects_to_delete])
+            volumes_ROI.items() if key not in subjects_to_delete])
 
 medication = medication[~medication.ID.isin(patients_to_delete)]
 
@@ -452,7 +454,7 @@ def permutation_test(list_A, list_B, mat_obs, measure, ntest=1000):
     for j in range(p):
         mat_pval[j] = np.sum(mat_permut[j, :] >= mat_obs[j]) / ntest
             
-    return t_max, mat_pval
+    return np.sort(max_stat), mat_pval
 
 def f_test(x_, y_):
     f = np.var(x_, ddof=1)/np.var(y_, ddof=1)
@@ -1179,17 +1181,25 @@ for metric in global_metrics:
 #%% Mean and std measures of each region
 mean_measures_patients = {} # mean value of the measures per region
 std_measures_patients = {} # standard deviation of the measures per region
+original_mean_measures_patients = {}
+original_std_measures_patients = {}
 for measure in measures_patients.keys():
     if measure in local_metrics:
         mean_measures_patients[measure] = np.mean(measures_patients[measure], axis=0)
         std_measures_patients[measure] = np.std(measures_patients[measure], axis=0)
+        original_mean_measures_patients[measure] = np.mean(original_measures_patients[measure], axis=0)
+        original_std_measures_patients[measure] = np.std(original_measures_patients[measure], axis=0)
             
 mean_measures_controls = {} # mean value of the measures per region
 std_measures_controls = {} # standard deviation of the measures per region
+original_mean_measures_controls = {}
+original_std_measures_controls = {}
 for measure in measures_patients.keys():
     if measure in local_metrics:
         mean_measures_controls[measure] = np.mean(measures_controls[measure], axis=0)
         std_measures_controls[measure] = np.std(measures_controls[measure], axis=0)
+        original_mean_measures_controls[measure] = np.mean(original_measures_controls[measure], axis=0)
+        original_std_measures_controls[measure] = np.std(original_measures_controls[measure], axis=0)
 
 #%% GLM 
 #%% Data construction
@@ -1391,7 +1401,7 @@ _, p_value_region['global_strength'], _ = sp.stats.ttest_ind(measures_subjects['
 
 for measure in p_value_region.keys():
     if measure in local_metrics:
-        print(measure, "- Number of p_value inferior to 0.05/80:", (p_value_region[measure] < 0.05/80).sum())
+        print(measure, "- Number of p_value inferior to 0.05/80:", (p_value_region[measure] < 0.05/nb_ROI).sum())
         
 #%% FDR correction 
 from statsmodels.stats.multitest import multipletests
@@ -1401,14 +1411,15 @@ for measure in local_metrics:
     res_fdr_region[measure], p_value_fdr_region[measure], _, _ = multipletests(p_value_region[measure], alpha=0.05, method='fdr_bh')
     
 #%% Plot values and significant differences - Local measures
-p_value = 0.05/80
+p_value = 0.05/nb_ROI
+# atlas_region_coords = np.loadtxt('../data/glasser/glasser_coords.txt')
 atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
 
 i=0
 for measure in mean_measures_controls.keys():
     plt.figure(figsize=(18, 5))
     plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
-    plt.fill_between(np.linspace(0,79,80), 
+    plt.fill_between(np.linspace(0,nb_ROI-1,nb_ROI), 
                      mean_measures_controls[measure] - std_measures_controls[measure], 
                      mean_measures_controls[measure] + std_measures_controls[measure],
                      alpha=0.25,
@@ -1417,7 +1428,7 @@ for measure in mean_measures_controls.keys():
                      linewidth=2)
     
     plt.plot(mean_measures_patients[measure], marker='o', color='black', label='patients')
-    plt.fill_between(np.linspace(0,79,80), 
+    plt.fill_between(np.linspace(0,nb_ROI-1,nb_ROI), 
                      mean_measures_patients[measure] - std_measures_patients[measure], 
                      mean_measures_patients[measure] + std_measures_patients[measure],
                      alpha=0.5,
@@ -1435,8 +1446,8 @@ for measure in mean_measures_controls.keys():
             #    plt.axvline(x=region_count, linestyle='--', color='red')
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
-    plt.title(measures_networks[i] + ' - Welch test - ' + str(n_permut) + ' permutation tests', fontweight='bold', loc='center', fontsize=16)
-    plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+    plt.title(measures_networks[i] + ' - t-test - ' + str(n_permut) + ' permutation tests', fontweight='bold', loc='center', fontsize=16)
+    plt.xticks(np.linspace(0,nb_ROI-1,nb_ROI).astype(int), rotation=70)
     plt.legend()
     # plt.savefig('graph_pictures/welch/pdf/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
     plt.show()
@@ -1459,7 +1470,7 @@ U2 = {}
 U = {}
 p_values_mat = {}
 t_max_measures = {}
-n_permut = 500
+n_permut = 100
 print('Computing Mann-Whitney test ...')
 for measure in local_metrics:
     print(measure)
@@ -1471,18 +1482,21 @@ for measure in local_metrics:
     U1[measure] = np.zeros((nb_ROI, ))
     U[measure] = np.zeros((nb_ROI, ))
     for i in range(nb_ROI):
-        U1[measure][i], _ = sp.stats.mannwhitneyu(original_measures_patients[measure][:, i], original_measures_controls[measure][:, i])
+        U1[measure][i], p_values_mat[measure][i] = sp.stats.mannwhitneyu(original_measures_patients[measure][:, i], original_measures_controls[measure][:, i])
         U2[measure] = patients_count * controls_count - U1[measure]
         U[measure] = np.minimum(U1[measure], U2[measure])
         # U[measure][i], _, _ = sp.stats.ttest_ind(measures_patients[measure][:, i], measures_controls[measure][:, i], equal_var=False)
 
         # Need to change in 'permutation_test' the method if the latest was changed !!!
-    t_max_measures[measure], p_values_mat[measure] = permutation_test(subset_controls,
-                                    subset_patients,
-                                    U[measure],
-                                    measure,
-                                    n_permut)
+    # t_max_measures[measure], p_values_mat[measure] = permutation_test(subset_controls,
+    #                                 subset_patients,
+    #                                 U[measure],
+    #                                 measure,
+    #                                 n_permut)
     
+for measure in p_values_mat.keys():
+    if measure in local_metrics:
+        print(measure, "- Number of p_value inferior to 0.05/80:", (p_values_mat[measure] < 0.05/80).sum())
 #%% t_max with scipy permutations for WELCH/STUDENT's test
 method='welch'
 t_permutation = {}
@@ -1497,14 +1511,14 @@ for measure in local_metrics:
     p_values_mat[measure] = np.zeros((nb_ROI,))
     t_permutation[measure] = np.zeros((n_permut, nb_ROI))
     for region_count in range(nb_ROI):
-        stats_measures[measure][region_count], p_values_mat[measure][region_count], t_permutation[measure][:, region_count] = sp.stats.ttest_ind(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count], permutations=n_permut, equal_var=False)
+        stats_measures[measure][region_count], p_values_mat[measure][region_count], t_permutation[measure][:, region_count] = sp.stats.ttest_ind(measures_patients[measure][:, region_count], measures_controls[measure][:, region_count], permutations=n_permut, equal_var=True)
         
     c = int(np.floor(alpha * n_permut))
     t_max_measures[measure] = np.sort(np.max(t_permutation[measure], axis=1))
     
 #%% 
 for measure in global_metrics:
-    _, p_values_mat[measure], _ = sp.stats.ttest_ind(measures_subjects[measure][:patients_count], measures_subjects[measure][patients_count:], permutations=100000, equal_var=False)
+    _, p_values_mat[measure], _ = sp.stats.ttest_ind(measures_subjects[measure][:patients_count], measures_subjects[measure][patients_count:], permutations=100000, equal_var=True)
     
 #%%
 c = int(np.floor(alpha * n_permut))
@@ -1514,7 +1528,7 @@ for measure in local_metrics:
         signif_regions_max_stat[measure] = np.array(np.where(U[measure] > t_max_measures[measure]), dtype=int).T.ravel()
     else:
         signif_regions_max_stat[measure] = np.array(np.where(stats_measures[measure] > t_max_measures[measure][::-1][c]), dtype=int).T.ravel()
-signif_regions_max_stat.pop('deg')
+# signif_regions_max_stat.pop('deg')
 # signif_regions_max_stat.pop('local_efficiency')
 # signif_regions_max_stat.pop('clust_coef')
     
@@ -1583,69 +1597,69 @@ disp.title('Regions exhibiting significant differences by \nmaximal statistic pe
 fig.savefig('graph_pictures/maximal_statistic.png', dpi=300, bbox_inches='tight')
 plotting.show()
     
-#%%
-def permutation_test_global(list_A, list_B, mat_obs, measure, ntest=5000):
-    """
-    Perform permutation tests for global graph measures. 
+#%% Mann-Whitney permutation test on global metrics
+# def permutation_test_global(list_A, list_B, mat_obs, measure, ntest=5000):
+#     """
+#     Perform permutation tests for global graph measures. 
 
-    Parameters
-    ----------
-    list_A : list
-        indices or names of first group.
-    list_B : list
-        indices or names of second group.
-    mat_obs : Nx1 np.ndarray
-        observed matrix.
-    measure : string
-        name of tested measure.
-    ntest : int, optional
-        number of permutations to perform. The default is 1000.
+#     Parameters
+#     ----------
+#     list_A : list
+#         indices or names of first group.
+#     list_B : list
+#         indices or names of second group.
+#     mat_obs : Nx1 np.ndarray
+#         observed matrix.
+#     measure : string
+#         name of tested measure.
+#     ntest : int, optional
+#         number of permutations to perform. The default is 1000.
 
-    Returns
-    -------
-    mat_pval : Nx1 np.ndarray
-        matrix of p-values after permutation.
+#     Returns
+#     -------
+#     mat_pval : Nx1 np.ndarray
+#         matrix of p-values after permutation.
 
-    """
-    mat_permut_U1 = np.zeros((ntest))
-    mat_permut_U2 = np.zeros((ntest))    
-    mat_permut = np.zeros((ntest))
+#     """
+#     mat_permut_U1 = np.zeros((ntest))
+#     mat_permut_U2 = np.zeros((ntest))    
+#     mat_permut = np.zeros((ntest))
     
-    # 1. randomize samples
-    for t in range(ntest):
-        subset_size = len(list_A)
-        concat_subset = list_A + list_B
-        random.shuffle(concat_subset)
-        subset_A, subset_B = concat_subset[:subset_size], concat_subset[subset_size:]
+#     # 1. randomize samples
+#     for t in range(ntest):
+#         subset_size = len(list_A)
+#         concat_subset = list_A + list_B
+#         random.shuffle(concat_subset)
+#         subset_A, subset_B = concat_subset[:subset_size], concat_subset[subset_size:]
         
-        mat_permut_U1[t], _ = sp.stats.mannwhitneyu(measures_subjects[measure][subset_A], measures_subjects[measure][subset_B])
-        mat_permut_U2[t] = patients_count * controls_count - mat_permut_U1[t]
-        mat_permut[t] = np.minimum(mat_permut_U1[t], mat_permut_U2[t])
+#         mat_permut_U1[t], _ = sp.stats.mannwhitneyu(measures_subjects[measure][subset_A], measures_subjects[measure][subset_B])
+#         mat_permut_U2[t] = patients_count * controls_count - mat_permut_U1[t]
+#         mat_permut[t] = np.minimum(mat_permut_U1[t], mat_permut_U2[t])
         
-    alternative = "two-sided"
-    compare = {"less": np.less_equal,
-               "greater": np.greater_equal,
-               "two-sided": lambda x, y: (x <= -np.abs(y)) | (x >= np.abs(y))}
+#     alternative = "two-sided"
+#     compare = {"less": np.less_equal,
+#                "greater": np.greater_equal,
+#                "two-sided": lambda x, y: (x <= -np.abs(y)) | (x >= np.abs(y))}
 
-    # Calculate the p-values
-    cmps = compare[alternative](mat_permut, mat_obs)
-    pvalues = cmps.sum(axis=0) / ntest
+#     # Calculate the p-values
+#     cmps = compare[alternative](mat_permut, mat_obs)
+#     pvalues = cmps.sum(axis=0) / ntest
 
-    return mat_permut, pvalues
+#     return mat_permut, pvalues
 
-for measure in global_metrics:
-    subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
-    subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
+# for measure in global_metrics:
+#     subset_patients = [random.randint(0, patients_count-1) for _ in range(patients_count)] # hardcoded number of patients taken for each test
+#     subset_controls = [random.randint(patients_count, subject_count-1) for _ in range(controls_count)] # hardcoded number of controls taken for each test
     
-    U1[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
-    U2[measure] = patients_count * controls_count - U1[measure]
-    U[measure] = np.minimum(U1[measure], U2[measure])
+#     U1[measure], _ = sp.stats.mannwhitneyu(measures_patients[measure], measures_controls[measure])
+#     U2[measure] = patients_count * controls_count - U1[measure]
+#     U[measure] = np.minimum(U1[measure], U2[measure])
 
-    _, p_values_mat[measure] = permutation_test_global(subset_controls,
-                                    subset_patients,
-                                    U[measure],
-                                    measure,
-                                    5000)
+#     _, p_values_mat[measure] = permutation_test_global(subset_controls,
+#                                     subset_patients,
+#                                     U[measure],
+#                                     measure,
+#                                     5000)
     
 #%% FDR correction
 p_values_fdr_mat = {}
@@ -1657,38 +1671,42 @@ p_value = 0.05/80
 i=0
 for measure in local_metrics:
     plt.figure(figsize=(18, 5))
-    plt.plot(mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
+    plt.plot(original_mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
     plt.fill_between(np.linspace(0,79,80), 
-                     mean_measures_controls[measure] - std_measures_controls[measure], 
-                     mean_measures_controls[measure] + std_measures_controls[measure],
+                     original_mean_measures_controls[measure] - original_std_measures_controls[measure], 
+                     original_mean_measures_controls[measure] + original_std_measures_controls[measure],
                      alpha=0.25,
                      color='cyan',
                      edgecolor='steelblue',
                      linewidth=2)
     
-    plt.plot(mean_measures_patients[measure], marker='o', color='black', label='patients')
+    plt.plot(original_mean_measures_patients[measure], marker='o', color='black', label='patients')
     plt.fill_between(np.linspace(0,79,80), 
-                     mean_measures_patients[measure] - std_measures_patients[measure], 
-                     mean_measures_patients[measure] + std_measures_patients[measure],
+                     original_mean_measures_patients[measure] - original_std_measures_patients[measure], 
+                     original_mean_measures_patients[measure] + original_std_measures_patients[measure],
                      alpha=0.5,
                      color='darkgray',
                      edgecolor='dimgray',
                      linewidth=2)
     
     for region_count in range(nb_ROI):
-        if measure != 'charac_path' and measure != 'global_efficiency':
+        if measure not in global_metrics:
             # Bonferroni correction
-            if p_values_mat[measure][region_count] < p_value:
-                plt.axvline(x=region_count, linestyle='--', color='red')
+            # if p_values_mat[measure][region_count] < p_value:
+            #     plt.axvline(x=region_count, linestyle='--', color='red')
             # FDR correction
             # if res_fdr_mat[measure][region_count]:
             #     plt.axvline(x=region_count, linestyle='--', color='red')
+            # Maximal statistic correction
+            if region_count in signif_regions_max_stat[measure]:
+                plt.axvline(x=region_count, linestyle='--', color='red')
+                
     plt.ylabel(measures_networks[i])
     plt.xlabel('Regions of Interest (80 ROIs)')
-    plt.title(measures_networks[i] + ' - Welch test - ' + str(n_permut) + ' permutation tests' + ' - p value=' + '0.05/80', fontweight='bold', loc='center', fontsize=16)
+    #plt.title(measures_networks[i] + ' - t-test - ' + str(n_permut) + ' permutation tests', fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
     plt.legend()
-    # plt.savefig('graph_pictures/mann-whitney/pdf/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
+    plt.savefig('graph_pictures/max_stat/pdf/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
     plt.show()
     
     fig = plt.figure(figsize=(6, 2.75))
@@ -1701,11 +1719,11 @@ for measure in local_metrics:
     # No significative nodes
     if len(np.unique(matrix_map)) == 1 and len(np.unique(atlas_threshold)) == 1:
         matrix_map, atlas_threshold = np.zeros((0, 0)), np.zeros((0, 3))
-    disp = plotting.plot_connectome(matrix_map, 
+    disp = plotting.plot_connectome(matrix_map,
                                     atlas_threshold,
                                     figure=fig)
 
-    # disp.savefig('graph_pictures/mann-whitney/pdf/' + str(n_permut) + '/' + measures_networks[i] + '_brain.pdf')
+    #disp.savefig('graph_pictures/max_stat/pdf/' + str(n_permut) + '/' + measures_networks[i] + '_brain.pdf')
     plotting.show()
     i+=1
     

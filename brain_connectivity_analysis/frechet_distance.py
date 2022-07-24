@@ -14,13 +14,16 @@ import numpy as np
 import scipy as sp
 from matplotlib import pyplot as plt
 import seaborn as sns
+import sys
+
+sys.path.append('../utils')
 sns.set()
 
-from utils.utils import printProgressBar
+from utils import printProgressBar
 
 # Load variables from data_preprocessed.pickle
 with open('../manage_data/data_preprocessed.pickle', 'rb') as f:
-    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict = pickle.load(f)
+    connectivity_matrices, controls, patients, controls_count, patients_count, subject_count, patient_info_dict, responders, non_responders, response_df, medication = pickle.load(f)
 
 # Load volumes from volumes_preprocessed.picke
 with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
@@ -29,12 +32,28 @@ with open('../manage_data/volumes_preprocessed.pickle', 'rb') as f:
 nb_ROI = len(connectivity_matrices[patients[0]])
 
 # TEMPORARY
-subjects_to_delete = ['lgp_081LJ',
+patients_to_delete = ['lgp_081LJ',
                       'lgp_096MS',
                       'lgp_086CA',
-                      'S168',
-                      'EMODES_003LS', # no info on excel
-                      'EMODES_004ML']
+                       'lgp_115LMR', # exclu
+                       'lgp_142JO', # age is NA
+                      ] 
+controls_to_delete = ['S168',
+                     'EMODES_003LS', # no info on excel
+                     'EMODES_004ML',
+                     'DEP_001SAL', # outliers
+                     'DEP_003VB',
+                     'DEP_004SC',
+                     'DEP_005AS',
+                     'DEP_006LD',
+                     'DEP_007RT',
+                     'DEP_008SR',
+                     'DEP_009OP',
+                     'DEP_010NL',
+                     'DEP_012EP',
+                      ]
+
+subjects_to_delete = patients_to_delete + controls_to_delete
 
 for subject in subjects_to_delete:
     if subject in patients:
@@ -154,7 +173,7 @@ def nb_fiber2density(matrices, volumes):
     for subject, mat in densities.items():
         for i in range(n):
             for j in range(n):
-                mat[i, j] = mat[i, j] / (volumes[subject][i, 0] + volumes[subject][j, 0])
+                mat[i, j] = mat[i, j] / (volumes[subject][i, 1] + volumes[subject][j, 1])
     
     return densities
 #%% Get normalized laplacian for each subject
