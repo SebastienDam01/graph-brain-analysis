@@ -1,5 +1,7 @@
-graph_pictures/*
+brain_connectivity_analysis/graph_pictures/*
 *.odt
-*.txt
 *.png
 *.mat
+data/*
+*pickle
+*.npy
