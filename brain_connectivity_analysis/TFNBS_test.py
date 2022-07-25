@@ -255,7 +255,7 @@ def permutation_test(x_, y_, mat_obs, alpha, method='t', ntest=1000, E=0.4, H=3)
     return t_max, mat_pval_uncorrected, mat_pval_corrected, mat_tfnbs_permut, thresholds_perm, np.sort(max_stat)
 
 if __name__ == '__main__':
-    with open('manage_data/connection_analysis.pickle', 'rb') as f:
+    with open('manage_data/responders_analysis.pickle', 'rb') as f:
         x, y = pickle.load(f)
     ###
     parser = create_arg_parser()
@@ -340,54 +340,6 @@ for cnt, b in enumerate(axes.flat):
 figure.tight_layout()
 #plt.savefig('graph_pictures/tfnbs/tfnbs_grid_parameters_E=0.75' + '.png', dpi=300)
 plt.show()
-#%%
-# def comp(matrix):
-#     n=len(matrix)
-#     connected_comp = np.zeros((n, n))
-    
-#     ixes = np.where(np.triu(np.ones((n, n)), 1))
-#     ind_t, = np.where(matrix[np.triu_indices(n, 1)] > 0)
-#     print(ind_t)
-#     # suprathreshold adjacency matrix
-#     connected_comp[(ixes[0][ind_t], ixes[1][ind_t])] = 1
-#     connected_comp = connected_comp + connected_comp.T
-    
-#     plt.imshow(connected_comp)
-    
-#     a, sz = clustering.get_components(connected_comp)
-    
-#     # replace matrix element value by each component size
-#     # convert size from nodes to number of edges
-#     # only consider components comprising more than one node (e.g. a/l 1 edge)
-#     ind_sz, = np.where(sz > 1)
-#     ind_sz += 1
-#     nr_components = np.size(ind_sz)
-#     sz_links = np.zeros((nr_components,))
-#     for i in range(nr_components):
-#         nodes, = np.where(ind_sz[i] == a)
-#         sz_links[i] = np.sum(connected_comp[np.ix_(nodes, nodes)]) / 2
-#         connected_comp[np.ix_(nodes, nodes)] *= (i + 2)
-    
-#     # subtract 1 to delete any edges not comprising a component
-#     connected_comp[np.where(connected_comp)] -= 1
-    
-#     return connected_comp
-
-# test=comp(tfnbs_max_stats)
-
-# def comp(matrix):
-#     n=len(matrix)
-#     copy_matrix = copy.deepcopy(matrix)
-#     unique = list(np.unique(copy_matrix))
-#     for ind, value in enumerate(unique):
-#         for i in range(n):
-#             for j in range(n):
-#                 if copy_matrix[i, j] == value:
-#                     copy_matrix[i, j] = ind
-                    
-#     return copy_matrix
-
-# test=comp(tfnbs_max_stats)
 #%% corrected
 import copy 
 # import matplotlib as mpl
@@ -407,7 +359,7 @@ plt.ylabel('ROIs')
 plt.xticks(np.arange(0, 81, 10))
 plt.yticks(np.arange(0, 81, 10))
 #plt.title('TFNBS - {} test - E={} - H={} - \nalpha={} - n_permut={}'.format(method, E, H, alpha, ntest))
-plt.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_' + 'H=' + str(H) + '_' + str(ntest) + '.pdf')
+#plt.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_' + 'H=' + str(H) + '_' + str(ntest) + '.pdf')
 plt.show()
 
 #%% plot connectome
@@ -426,7 +378,7 @@ disp = plotting.plot_connectome(tfnbs_max_stats,
 # remove dot at the center
 atlas_threshold[atlas_threshold==0] = 'nan'
 
-disp.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_' + 'H=' + str(H) + str(ntest) + '_brain.pdf')
+#disp.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_' + 'H=' + str(H) + str(ntest) + '_brain.pdf')
 plotting.show()
 
 #%% Chosen TFNBS 

@@ -188,12 +188,63 @@ def DDT(x, y, method='aDDT', U=1000):
     return d_obs_pvalued
 
 if __name__ == '__main__':
-    with open('../manage_data/connection_analysis.pickle', 'rb') as f:
+    with open('../manage_data/connection_wo_thresh_analysis.pickle', 'rb') as f:
         x, y = pickle.load(f)
         
     parser = create_arg_parser()
     add_arguments(parser)
     args = parser.parse_args()
     
-    res = DDT(x, y, args.method, args.number)
+    res = DDT(x, y)
+    #res = DDT(x, y, args.method, args.number)
     print("Differentially connected nodes for each region: ", res)
+    
+#%% Plot on connectome
+import itertools
+import matplotlib.pyplot as plt
+nb_ROI=80
+atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
+
+def apply_threshold_regions(input_, atlas):
+    '''
+    Set values which are not in input_ to zero.
+
+    Parameters
+    ----------
+    input_ : dict
+        regions
+    atlas : np.array of shape (nb_ROI, 3)
+
+    Returns
+    -------
+
+
+    '''
+    atlas_copy = copy.deepcopy(atlas)
+    
+    signif_regions = [l.tolist() for l in input_]
+    #signif_regions = list(itertools.chain(*signif_regions))
+    
+    indices_set_to_zero = list(set(np.arange(0, nb_ROI)) - set(signif_regions))
+    atlas_copy[indices_set_to_zero] = 0
+    
+    matrix = np.zeros((nb_ROI, nb_ROI))
+    for index in signif_regions:
+        matrix[index][index] = 1
+    
+    return matrix, atlas_copy
+
+node_size = d_obs * 12
+
+fig = plt.figure(figsize=(6, 2.75))
+matrix_map, atlas_threshold = apply_threshold_regions(np.where(d_obs>3)[0], atlas_region_coords)
+atlas_threshold[atlas_threshold==0] = 'nan'
+
+disp = plotting.plot_connectome(matrix_map, 
+                                atlas_threshold,
+                                node_color='DarkBlue',
+                                node_size=node_size,
+                                figure=fig)
+
+#disp.savefig('graph_pictures/ddt_brain.pdf')
+plotting.show()
