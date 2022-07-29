@@ -150,7 +150,7 @@ def get_parsimonious_network(matrices, ratio=0.7, ratio_fiber=0):
                     count+=1
     return key_cnt, matrices_copy
 
-def threshold_connections(matrices_dict, ratio=0.75):
+def threshold_connections(matrices_dict, ratio=0.7):
     matrices_copy = copy.deepcopy(matrices_dict)
     matrices_array = np.zeros((nb_ROI, nb_ROI, subject_count))
     i=0
@@ -365,10 +365,10 @@ for i in tqdm(range(nb_ROI)):
 #%% pickle connections
 x=fitted_linear_connections_subjects[:, :, patients_count:] # patients
 y=fitted_linear_connections_subjects[:, :, :patients_count] # controls
-# with open('../manage_data/connection_analysis.pickle', 'wb') as f:
-#     pickle.dump(
-#         [x, 
-#           y], f)
+with open('../manage_data/connection_analysis.pickle', 'wb') as f:
+    pickle.dump(
+        [x, 
+          y], f)
     
 #%% 2. t-test
 p_value_connection = np.zeros((nb_ROI, nb_ROI))
@@ -822,7 +822,7 @@ plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
 plt.title('NBS, threshold={:,.4f}'.format(threshold_grid[OPTIMAL_THRESHOLD_COUNT]))
-# plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.pdf')
+#plt.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '.png', dpi=300)
 plt.show()
 
 threshold_adj = copy.deepcopy(nbs_network)
@@ -848,6 +848,7 @@ node_size = degree * 50
 fig = plt.figure(figsize=(6, 2.75))
 
 atlas_threshold = apply_threshold(nbs_network, atlas_region_coords)
+atlas_threshold[atlas_threshold==0] = 'nan'
 disp = plotting.plot_connectome(nbs_network, 
                                 atlas_threshold,
                                 node_size=50,
@@ -859,7 +860,7 @@ disp = plotting.plot_connectome(nbs_network,
                                 # edge_cmap=mpl.colors.ListedColormap(['royalblue', 'dimgray', 'royalblue', 'dimgray', 'royalblue', 'dimgray']),
                                 figure=fig)
 
-# disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.pdf')
+disp.savefig('graph_pictures/NBS/' + 'nbs_' + str(threshold_grid[OPTIMAL_THRESHOLD_COUNT]) + '_brain.png', dpi=300)
 plotting.show()
 
 #%% Export the connections exhibiting significative differences
@@ -883,15 +884,14 @@ with open('../manage_data/features_connections.pickle', 'wb') as f:
 significant_t_score = copy.deepcopy(statistics)
 significant_t_score[nbs_network == 0] = 0
 significant_t_score = significant_t_score + significant_t_score.T - np.diag(np.diag(significant_t_score))
-
 plt.imshow(significant_t_score, cmap='bwr')
 plt.colorbar(label="t-statistic")
 plt.xticks(np.arange(0, nb_ROI + 1, 10))
 plt.yticks(np.arange(0, nb_ROI + 1, 10))
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.title('Heatmap of t-score, NBS corrected')
-#plt.savefig('graph_pictures/heatmap_connection.png', dpi=600)
+#plt.title('Heatmap of t-score, NBS corrected')
+#plt.savefig('graph_pictures/heatmap_connection.png', dpi=300)
 plt.show()
 
 #%% BCT ttest

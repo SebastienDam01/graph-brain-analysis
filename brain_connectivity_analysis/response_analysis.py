@@ -18,6 +18,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from nilearn import plotting
 from tqdm import tqdm 
+import itertools
 sns.set()
 
 sys.path.append('../utils')
@@ -1234,13 +1235,13 @@ for measure in mean_measures_non_responders.keys():
 #                                     n_permut)
     
 #%% t_max with scipy permutations for WELCH/STUDENT's test
-# method='welch'
-# t_permutation = {}
-# t_max_measures = {}
-# stats_measures = {}
-# p_values_mat = {}
-# n_permut = 100000
-# alpha=0.05
+method='welch'
+t_permutation = {}
+t_max_measures = {}
+stats_measures = {}
+p_values_mat = {}
+n_permut = 100000
+alpha=0.05
 # for measure in local_metrics:
 #     print(measure)
 #     stats_measures[measure] = np.zeros((nb_ROI,))

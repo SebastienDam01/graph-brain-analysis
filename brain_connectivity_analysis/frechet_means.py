@@ -226,8 +226,8 @@ for subject, d in connectivity_matrices.items():
 
 F = np.zeros((nb_ROI, nb_ROI))
 for _ in tqdm(range(100)):
-    subset_controls = random.choices(controls, k=controls_count) # hardcoded number of controls taken for each test
-    subset_patients = random.choices(patients, k=patients_count) # hardcoded number of patients taken for each test
+    subset_controls = random.choices(controls, k=10) # hardcoded number of controls taken for each test
+    subset_patients = random.choices(patients, k=20) # hardcoded number of patients taken for each test
 
     frechet_mean_controls = frechet_mean_closed_form(laplacian_matrices, subset_controls)
     frechet_mean_patients = frechet_mean_closed_form(laplacian_matrices, subset_patients)
@@ -236,7 +236,7 @@ for _ in tqdm(range(100)):
     p_values_mat = spd_permutation_test(subset_controls,
                                         subset_patients,
                                         frechet_mean_obs,
-                                        1000)
+                                        100)
     
     for i in range(nb_ROI):
         for j in range(nb_ROI):
@@ -250,7 +250,7 @@ plt.grid(False)
 plt.colorbar(label="Nombre de connexions significatives")
 plt.xlabel('ROIs')
 plt.ylabel('ROIs')
-plt.savefig('brain_connectivity_analysis/graph_pictures/frechet_means.png', dpi=600)
+plt.savefig('brain_connectivity_analysis/graph_pictures/frechet_means.pdf')
 plt.show()
 
 #%% Brain visualization
@@ -262,5 +262,5 @@ F_threshold, atlas_threshold = apply_threshold(F, 10, atlas_region_coords)
 disp = plotting.plot_connectome(F_threshold, 
                                 atlas_threshold,
                                 figure=fig)
-disp.savefig('brain_connectivity_analysis/graph_pictures/frechet_mean_brain.png', dpi=600)
+disp.savefig('brain_connectivity_analysis/graph_pictures/frechet_mean_brain.pdf')
 plotting.show()

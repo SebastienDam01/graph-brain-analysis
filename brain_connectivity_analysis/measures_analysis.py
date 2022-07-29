@@ -1518,7 +1518,7 @@ for measure in local_metrics:
     
 #%% 
 for measure in global_metrics:
-    _, p_values_mat[measure], _ = sp.stats.ttest_ind(measures_subjects[measure][:patients_count], measures_subjects[measure][patients_count:], permutations=100000, equal_var=True)
+    stats_measures[measure], p_values_mat[measure], _ = sp.stats.ttest_ind(measures_subjects[measure][:patients_count], measures_subjects[measure][patients_count:], permutations=100000, equal_var=True)
     
 #%%
 c = int(np.floor(alpha * n_permut))
@@ -1585,6 +1585,13 @@ disp = plotting.plot_connectome(matrix_map,
 
 
 color_dict.pop('nan')
+# FIXME
+color_dict['Betweenness centrality'] = color_dict.pop('between_cen')
+color_dict['Clustering coefficient'] = color_dict.pop('clust_coef')
+color_dict['Local efficiency'] = color_dict.pop('local_efficiency')
+color_dict['Degree centrality'] = color_dict.pop('deg')
+color_dict['Node curvature'] = color_dict.pop('curvature')
+color_dict['Strength'] = color_dict.pop('strength')
 legend_elements = []
 for k,v in color_dict.items():
     legend_elements.append(Line2D([0], [0], marker='o', color=v, label=k,
@@ -1594,7 +1601,7 @@ ax.axis("off")
 ax.legend(handles=legend_elements, loc=(1.2, 0.3))
 disp.title('Regions exhibiting significant differences by \nmaximal statistic permutation tests \n(n=100000, alpha=0.05)')
 
-fig.savefig('graph_pictures/maximal_statistic.png', dpi=300, bbox_inches='tight')
+#fig.savefig('graph_pictures/maximal_statistic.png', dpi=300, bbox_inches='tight')
 plotting.show()
     
 #%% Mann-Whitney permutation test on global metrics
@@ -1670,7 +1677,7 @@ for measure in local_metrics:
 p_value = 0.05/80
 i=0
 for measure in local_metrics:
-    plt.figure(figsize=(18, 5))
+    plt.figure(figsize=(20, 5))
     plt.plot(original_mean_measures_controls[measure], marker='o', color='darkturquoise', label='controls')
     plt.fill_between(np.linspace(0,79,80), 
                      original_mean_measures_controls[measure] - original_std_measures_controls[measure], 
@@ -1705,6 +1712,7 @@ for measure in local_metrics:
     plt.xlabel('Regions of Interest (80 ROIs)')
     #plt.title(measures_networks[i] + ' - t-test - ' + str(n_permut) + ' permutation tests', fontweight='bold', loc='center', fontsize=16)
     plt.xticks(np.linspace(0,79,80).astype(int), rotation=70)
+    plt.grid(False)
     plt.legend()
     plt.savefig('graph_pictures/max_stat/pdf/' + str(n_permut) + '/' + measures_networks[i] + '.pdf')
     plt.show()

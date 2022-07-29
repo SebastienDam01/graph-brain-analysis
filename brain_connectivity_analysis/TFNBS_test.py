@@ -21,9 +21,12 @@ from tqdm import tqdm
 import seaborn as sns
 sns.set()
 
+from joblib import Parallel, delayed
+
 patients_count = 154
 controls_count = 87
-atlas_region_coords = np.loadtxt('data/COG_free_80s.txt')
+atlas_region_coords = np.loadtxt('../data/COG_free_80s.txt')
+n_jobs=2
 
 def create_arg_parser():
     parser = argparse.ArgumentParser(prog=__file__, description=""" Threshold-free Network-Based Statistics (TFNBS)""", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -110,8 +113,10 @@ def raw_statistics(x, y, method='t'):
             ymat[:, i] = y[:, :, i][ixes].squeeze()
             
         t_stats = np.zeros((m,))
-        for i in range(m):
-            t_stats[i], _, _ = sp.stats.ttest_ind(xmat[i,:], ymat[i,:], equal_var=False)
+        # for i in range(m):
+        #     t_stats[i], _, _ = sp.stats.ttest_ind(xmat[i,:], ymat[i,:], equal_var=False)
+        res = Parallel(n_jobs=n_jobs)(delayed(sp.stats.ttest_ind)(xmat[i,:], ymat[i,:], equal_var=False) for i in range(m))
+        t_stats, _, _ = zip(*res)
             
         ind = np.triu_indices(nb_ROI, 1)
         statistics[ind] = t_stats
@@ -226,8 +231,12 @@ def permutation_test(x_, y_, mat_obs, alpha, method='t', ntest=1000, E=0.4, H=3)
     # TFNBS
     print("Computing TFNBS permutation matrices...")
     mat_tfnbs_permut = np.zeros((p, p, ntest))
-    for t in tqdm(range(ntest)):
-        mat_tfnbs_permut[:, :, t] = tfnbs(mat_permut[:, :, t], thresholds_perm[t], E, H)
+    # for t in tqdm(range(ntest)):
+    #     mat_tfnbs_permut[:, :, t] = tfnbs(mat_permut[:, :, t], thresholds_perm[t], E, H)
+        
+    res = Parallel(n_jobs=n_jobs)(delayed(tfnbs)(mat_permut[:, :, t], thresholds_perm[t], E, H) for t in tqdm(range(ntest)))
+    for t in range(ntest):
+        mat_tfnbs_permut[..., t] = res[t]
     
     # maximal statistic
     max_stat=np.zeros((ntest,))
@@ -255,7 +264,7 @@ def permutation_test(x_, y_, mat_obs, alpha, method='t', ntest=1000, E=0.4, H=3)
     return t_max, mat_pval_uncorrected, mat_pval_corrected, mat_tfnbs_permut, thresholds_perm, np.sort(max_stat)
 
 if __name__ == '__main__':
-    with open('manage_data/responders_analysis.pickle', 'rb') as f:
+    with open('../manage_data/connection_analysis.pickle', 'rb') as f:
         x, y = pickle.load(f)
     ###
     parser = create_arg_parser()
@@ -267,7 +276,7 @@ if __name__ == '__main__':
     alpha=0.05
     E=0.4
     H=3
-    ntest=1000
+    ntest=5000
     ###
     t_max_list = []
     raw_stats = raw_statistics(x, y, method)
@@ -369,14 +378,13 @@ from nilearn import plotting
 fig = plt.figure(figsize=(6, 2.75))
 
 atlas_threshold = apply_threshold(tfnbs_max_stats, atlas_region_coords)
+# remove dot at the center
+atlas_threshold[atlas_threshold==0] = 'nan'
 disp = plotting.plot_connectome(tfnbs_max_stats, 
                                 atlas_threshold,
                                 node_color='DarkBlue',
                                 edge_cmap=cm.tab10,
                                 figure=fig)
-
-# remove dot at the center
-atlas_threshold[atlas_threshold==0] = 'nan'
 
 #disp.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_' + 'H=' + str(H) + str(ntest) + '_brain.pdf')
 plotting.show()
@@ -409,7 +417,7 @@ disp = plotting.plot_connectome(tfnbs_matrix_stats_list[9],
                                 node_size=node_size,
                                 figure=fig)
 
-disp.savefig('graph_pictures/tfnbs/E=0.5/' + 'tfnbs_' + 'H=' + str(2.75) + '_' + str(1000) + '_brain.png', dpi=300)
+#disp.savefig('graph_pictures/tfnbs/E=0.5/' + 'tfnbs_' + 'H=' + str(2.75) + '_' + str(1000) + '_brain.png', dpi=300)
 plotting.show()
 
 #%% uncorrected
@@ -487,7 +495,7 @@ disp = plotting.plot_connectome(pval_fdr_corrected_inverse,
                                 edge_cmap=cm.tab10,
                                 figure=fig)
 
-disp.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_fdr_' + 'H=' + str(H) + str(ntest) + '_brain.pdf')
+#disp.savefig('graph_pictures/tfnbs/E=0.4/tfnbs_fdr_' + 'H=' + str(H) + str(ntest) + '_brain.pdf')
 plotting.show()
 #%%
 from statsmodels.stats.multitest import multipletests

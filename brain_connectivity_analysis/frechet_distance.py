@@ -227,9 +227,9 @@ plt.hist(p2c_dist, stacked=True, density=True, alpha=0.3, label='Patients')
 plt.hist(c2c_dist, stacked=True, density=True, alpha=0.3, label='Controls')
 sns.kdeplot(p2c_dist, shade=False, color='C0', alpha=0.3);
 sns.kdeplot(c2c_dist, shade=False, color='C1', alpha=0.3);
-plt.xlabel("Fréchet distance from patients to controls and controls to controls* \n *with some missing patients")
+#plt.xlabel("Fréchet distance from patients to controls and controls to controls")
 plt.legend()
-#plt.savefig("brain_connectivity_analysis/graph pictures on good matrices/distance_frechet", dpi=600)
+plt.savefig("graph_pictures/distance_frechet.pdf")
 
 plt.show()
 
@@ -245,7 +245,23 @@ x_pos = [i for i, _ in enumerate((x))]
 plt.bar(x_pos, mean_distances, yerr=std_distances)
 
 plt.xticks(x_pos, x)
-plt.title('Fréchet Distance')
-#plt.savefig('brain_connectivity_analysis/graph pictures on good matrices/distance_frechet_bar_plot.png', dpi=600)
+#plt.title('Fréchet Distance')
+plt.grid(False)
+plt.savefig('graph_pictures/distance_frechet_bar_plot.pdf')
 
 plt.show()
+
+#%%
+fig, axs = plt.subplots(1,2, figsize=(10,5), gridspec_kw={'width_ratios': [5,3]})
+axs[0].hist(p2c_dist, stacked=True, density=True, alpha=0.3, label='Patients')
+axs[0].hist(c2c_dist, stacked=True, density=True, alpha=0.3, label='Controls')
+sns.kdeplot(p2c_dist, ax=axs[0], shade=False, color='C0', alpha=0.3);
+sns.kdeplot(c2c_dist, ax=axs[0], shade=False, color='C1', alpha=0.3);
+axs[0].legend()
+
+axs[1].bar(x_pos, mean_distances, yerr=std_distances)
+plt.xticks(x_pos, x)
+axs[1].grid(False)
+
+plt.savefig('graph_pictures/distance_frechet_combined.pdf')
+
